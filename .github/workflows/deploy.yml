@@ -1,0 +1,149 @@
+# Builds the web app and puts it into the deploybase project (target web.anynear.app).
+#
+# Pull requests and merges to main: build the ANMP core, tests, production build, without publishing. Upload to
+# deploybase (production) only by hand: “Run workflow” with main as build X.Y.Z-<hash> (latest tag vX.Y.Z on main
+# plus commit) or with a tag vX.Y.Z without suffix on main as the new version X.Y.Z. The core comes from the repos
+# ANMP and ANDP, read with the token of a GitHub App (secrets CI_APP_ID, CI_APP_KEY; Contents read only).
+#
+# For the deployment: secret DEPLOYBASE_API_KEY and variable DEPLOYBASE_PROJECT_ID. If one of them is missing,
+# the run ends after the build with a notice.
+name: Build and publish
+
+on:
+  push:
+    branches: [main] # build and test only
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  # Do not cancel a running production deployment; the next merge waits.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Runners: GitHub's runners, unless the repository variables RUNNER_LINUX (builds) or RUNNER_RELEASE (Run workflow)
+    # name others (a JSON label list). Only the project's working repository sets them.
+    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && vars.RUNNER_RELEASE || vars.RUNNER_LINUX || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Web
+          fetch-depth: 0 # for checking whether the tag is on main, and the build number (commit count, ADR 0096)
+
+      # ANMP and ANDP: while the repositories are private, a short-lived token of the organisation's GitHub App;
+      # once they are public, the workflow token is enough (pull requests of forks get no secrets).
+      - uses: actions/create-github-app-token@v2
+        id: ci
+        if: github.event.repository.private
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_KEY }}
+          owner: anynear
+          repositories: ${{ vars.ANMP_REPO || 'ANMP' }},${{ vars.ANDP_REPO || 'ANDP' }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: anynear/${{ vars.ANMP_REPO || 'ANMP' }}
+          token: ${{ steps.ci.outputs.token || github.token }}
+          path: ANMP
+
+      - uses: actions/checkout@v4
+        with:
+          repository: anynear/${{ vars.ANDP_REPO || 'ANDP' }}
+          token: ${{ steps.ci.outputs.token || github.token }}
+          path: ANDP
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build the ANMP core
+        working-directory: Web
+        run: node scripts/anmp.mjs
+
+      - name: Dependencies
+        working-directory: Web
+        run: npm ci
+
+      - name: Tests
+        working-directory: Web
+        run: npm test
+
+      - name: Production build
+        working-directory: Web
+        run: npm run build
+
+      - name: Check the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: Web
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Tag $GITHUB_REF_NAME does not have the form vX.Y.Z (without a suffix)." >&2; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::Tag $GITHUB_REF_NAME is not on main." >&2; exit 1; }
+          # A version needs its release notes in release-notes/X.Y.Z.md (README there).
+          scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
+
+      # The deploybase CLI runs with `go run`; Go is not preinstalled on every runner.
+      - uses: actions/setup-go@v5
+        if: github.event_name == 'workflow_dispatch' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Publish to deploybase (production)
+        # Only by hand (Run workflow) with main or a tag vX.Y.Z.
+        if: github.event_name == 'workflow_dispatch' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+        working-directory: Web
+        env:
+          DEPLOYBASE_API_KEY: ${{ secrets.DEPLOYBASE_API_KEY }}
+          PROJECT_ID: ${{ vars.DEPLOYBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$DEPLOYBASE_API_KEY" ] || [ -z "$PROJECT_ID" ]; then
+            echo "::notice::DEPLOYBASE_API_KEY or DEPLOYBASE_PROJECT_ID is missing, no deployment."
+            exit 0
+          fi
+          # Official deploybase CLI (docs.deploybase.eu/reference/cli), upload of the finished dist/.
+          # Label like the version in vite.config.ts: tag vX.Y.Z or build vX.Y.Z-<hash>.
+          label="$GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            base=$(git tag --merged HEAD --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+            label="${base:-v0.0.0}-$(git rev-parse --short=7 HEAD)"
+          fi
+          # Fixed version (not @latest): this step holds DEPLOYBASE_API_KEY, so only a known CLI may run here. Go checks
+          # the module against sum.golang.org. Raise it on purpose after reading the changes.
+          go run codeberg.org/deploybase/deploybase-cli@v0.5.0 deploy ./dist \
+            --project "$PROJECT_ID" --label "Web $label" --skip-unchanged --wait
+          # Otherwise index.html stays in the deploybase cache for up to an hour (s-maxage=3600).
+          curl -fsS -X POST "https://api.deploybase.eu/api/v1/projects/$PROJECT_ID/cache/purge" \
+            -H "Authorization: Bearer $DEPLOYBASE_API_KEY" -o /dev/null -w "Purge cache: HTTP %{http_code}\n" || echo "::warning::The cache could not be purged"
+
+  # GitHub release of a version with the release notes from release-notes/X.Y.Z.md; the website shows the same text.
+  # Only after publishing by hand with a tag vX.Y.Z. Builds of main get no release.
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && vars.RUNNER_RELEASE || vars.RUNNER_LINUX || '"ubuntu-latest"') }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
