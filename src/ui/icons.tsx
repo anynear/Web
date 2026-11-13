@@ -24,6 +24,8 @@ function Icon({ size = 22, title, children }: Props & { children: JSX.Element | 
 }
 
 export const Back = (p: Props) => <Icon {...p}><path d="M15 18l-6-6 6-6" /></Icon>
+/** On to another page (AppIcons.Weiter): arrowhead to the right, e.g. behind a title that opens the details. */
+export const Forward = (p: Props) => <Icon {...p}><path d="M9 6l6 6-6 6" /></Icon>
 export const Close = (p: Props) => <Icon {...p}><path d="M6 6l12 12M18 6L6 18" /></Icon>
 export const Settings = (p: Props) => (
   <Icon {...p}>
@@ -151,6 +153,13 @@ export const Help = (p: Props) => (
     <circle cx="12" cy="12" r="9" />
     <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6" />
     <path d="M12 17h.01" />
+  </Icon>
+)
+/** Clock (AppIcons.Uhr), e.g. „Lebenszeichen starten“. */
+export const Clock = (p: Props) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
   </Icon>
 )
 /** Menu ⋮ (AppIcons.Menue). */

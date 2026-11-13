@@ -1,29 +1,18 @@
-// „Menschen“ as in the app (PeopleScreen, ContactsScreen, CirclesScreen): contacts and circles as two separate
-// lists, switchable at the top. Tapping a contact opens the conversation, tapping a circle the circle page.
+// „Kreise“ as in the app (ADR 0100, CirclesScreen): start a circle, accept an invite, the circles; tapping opens the
+// circle page. „Neue Nachricht“ (NewMessageScreen): circles and contacts to write to, plus „Kontakt hinzufügen“.
 import { computed, useSignal } from '@preact/signals'
 import { texts } from '../i18n'
-import { circleKey, directKey, parseKey } from '../core/messages'
-import { circles, me, open, openConv, ownImage, ownName, people, personName, summaries, supportPeer, type CircleView, type Person } from '../core/session'
+import { circleKey, directKey, type ConvKey } from '../core/messages'
+import { circles, me, open, openConv, people, supportPeer, type CircleView, type Person } from '../core/session'
 import { Avatar } from './Avatar'
 import { Button } from './components'
 import * as Icons from './icons'
-import { chatSearch, dialog, pane, peopleTab } from './nav'
+import { chatSearch, dialog, newMessage, pane } from './nav'
 
 /** All known people except oneself, by name. */
 const contacts = computed<Person[]>(() => {
   const own = me.value?.personId
   return [...people.value.values()].filter((p) => p.id !== own && p.id !== supportPeer.value).sort((a, b) => a.name.localeCompare(b.name))
-})
-
-/** Who has written directly without being known (like „Hat dir geschrieben“ in the app). */
-const strangers = computed<string[]>(() => {
-  const own = me.value?.personId
-  const list: string[] = []
-  for (const k of summaries.value.keys()) {
-    const { kind, id } = parseKey(k)
-    if (kind === 'direct' && id !== own && !people.value.has(id)) list.push(id)
-  }
-  return list
 })
 
 /** Where one knows someone from: „direkter Kontakt“, the shared circles or both. */
@@ -45,130 +34,84 @@ function matches(query: string, ...values: (string | undefined)[]): boolean {
   return !q || values.some((v) => v?.toLowerCase().includes(q))
 }
 
-export function PeopleNav() {
-  const showCircles = peopleTab.value === 'circles'
+/** „Neue Nachricht“: whom do you want to write to? Tapping opens the conversation, an existing one is continued. */
+export function NewMessageNav() {
+  const query = useSignal('')
+  const q = query.value
+  const shownCircles = circles.value.filter((c) => !c.removed && matches(q, c.name))
+  const shownPeople = contacts.value.filter((p) => matches(q, p.name, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)))
+  const pick = (key: ConvKey) => {
+    newMessage.value = false
+    pane.value = 'chat'
+    chatSearch.value = false
+    open(key)
+  }
   return (
     <div class="people-nav">
-      <div class="segmented" role="tablist" aria-label={texts.nav.people}>
-        {(['contacts', 'circles'] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={peopleTab.value === tab}
-            class={`segment ${peopleTab.value === tab ? 'active' : ''}`}
-            onClick={() => (peopleTab.value = tab)}
-          >
-            {tab === 'contacts' ? texts.list.contacts : texts.list.circles}
-          </button>
-        ))}
+      <div class="people-own">
+        <button type="button" class="list-action" onClick={() => (newMessage.value = false)}>
+          <Icons.Back size={18} /> {texts.nav.back}
+        </button>
+        <h2 class="section-title nav-title">{texts.list.whoToMessage}</h2>
       </div>
-      {showCircles ? <CirclesList /> : <ContactsList />}
+      <div class="list-tools">
+        <input class="input search" type="search" placeholder={texts.list.searchName} value={q} onInput={(e) => (query.value = e.currentTarget.value)} />
+      </div>
+      <div class="files-nav">
+        {shownCircles.length === 0 && shownPeople.length === 0 && q && <p class="muted small nav-note">{texts.people.noResults}</p>}
+        {shownCircles.length > 0 && (
+          <>
+            <h2 class="section-title nav-title">{texts.list.circles}</h2>
+            {shownCircles.map((c) => (
+              <button key={c.id} type="button" class="conv" onClick={() => pick(circleKey(c.id))}>
+                <Avatar id={c.id} kind="circle" size={40} image={c.image} />
+                <span class="conv-body">
+                  <span class="conv-name">{c.name}</span>
+                  <span class="conv-preview">{circleSummary(c)}</span>
+                </span>
+              </button>
+            ))}
+          </>
+        )}
+        {shownPeople.length > 0 ? (
+          <>
+            <h2 class="section-title nav-title">{texts.list.contacts}</h2>
+            {shownPeople.map((p) => (
+              <button key={p.id} type="button" class="conv" onClick={() => pick(directKey(p.id))}>
+                <Avatar id={p.id} kind="person" size={40} image={p.image} />
+                <span class="conv-body">
+                  <span class="conv-name">{p.name || texts.system.someone}</span>
+                  <span class="conv-preview">{originOf(p)}</span>
+                </span>
+              </button>
+            ))}
+          </>
+        ) : (
+          !q && <p class="muted small nav-note">{texts.list.noContactsYet}</p>
+        )}
+      </div>
+      <div class="people-foot people-own">
+        <Button kind="secondary" class="people-wide" onClick={() => { newMessage.value = false; dialog.value = 'addContact' }}>
+          <Icons.Plus size={18} /> {texts.list.addContact}
+        </Button>
+        <Button kind="secondary" class="people-wide" onClick={() => { newMessage.value = false; dialog.value = 'startCircle' }}>
+          <Icons.Plus size={18} /> {texts.list.startCircle}
+        </Button>
+      </div>
     </div>
   )
 }
 
-function openChat(id: string) {
-  pane.value = 'chat'
-  chatSearch.value = false
-  open(directKey(id))
-}
-
-function ContactsList() {
-  const query = useSignal('')
-  const q = query.value
-  const shown = contacts.value.filter((p) => matches(q, p.name, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)))
-  const shownStrangers = strangers.value.filter((id) => matches(q, personName(id)))
-  const empty = contacts.value.length === 0 && strangers.value.length === 0
-  const ownId = me.value?.personId ?? ''
-  return (
-    <>
-      <div class="people-own">
-        <button
-          type="button"
-          class={`conv ${pane.value === 'settings' ? 'active' : ''}`}
-          onClick={() => {
-            open(null)
-            pane.value = 'settings'
-          }}
-        >
-          {ownImage.value ? (
-            <img class="avatar" src={ownImage.value} width={40} height={40} style={{ borderRadius: '50%' }} alt="" />
-          ) : (
-            <Avatar id={ownId} kind="person" size={40} />
-          )}
-          <span class="conv-body">
-            <span class="conv-name">{texts.people.ownMember(ownName.value)}</span>
-            <span class="conv-preview">{texts.people.myProfile}</span>
-          </span>
-        </button>
-        <Button kind="secondary" class="people-wide" onClick={() => (dialog.value = 'ownContact')}>
-          <Icons.Share size={18} /> {texts.people.shareMyContact}
-        </Button>
-      </div>
-      {!empty && (
-        <div class="list-tools">
-          <input class="input search" type="search" placeholder={texts.people.searchContacts} value={q} onInput={(e) => (query.value = e.currentTarget.value)} />
-        </div>
-      )}
-      <div class="files-nav">
-        {shownStrangers.length > 0 && (
-          <>
-            <h2 class="section-title nav-title">{texts.people.wroteToYou}</h2>
-            {shownStrangers.map((id) => (
-              <PersonButton key={id} id={id} name={personName(id)} text={texts.people.notInContactsYet} image={null} />
-            ))}
-          </>
-        )}
-        {empty ? (
-          <p class="muted small nav-note">{texts.people.contactsEmpty}</p>
-        ) : shown.length === 0 && shownStrangers.length === 0 ? (
-          <p class="muted small nav-note">{texts.people.noResults}</p>
-        ) : (
-          shown.length > 0 && (
-            <>
-              <h2 class="section-title nav-title">{texts.people.allContacts}</h2>
-              {shown.map((p) => (
-                <PersonButton key={p.id} id={p.id} name={p.name || texts.system.someone} text={originOf(p)} image={p.image} />
-              ))}
-            </>
-          )
-        )}
-      </div>
-      <div class="people-foot">
-        <Button kind="main" class="people-wide" onClick={() => (dialog.value = 'addContact')}>
-          <Icons.Plus size={18} /> {texts.list.addContact}
-        </Button>
-      </div>
-    </>
-  )
-}
-
-function PersonButton({ id, name, text, image }: { id: string; name: string; text: string; image: Person['image'] }) {
-  const active = openConv.value === directKey(id) && pane.value !== 'settings'
-  return (
-    <button type="button" class={`conv ${active ? 'active' : ''}`} aria-current={active ? 'true' : undefined} onClick={() => openChat(id)}>
-      <Avatar id={id} kind="person" size={40} image={image} />
-      <span class="conv-body">
-        <span class="conv-name">{name}</span>
-        <span class="conv-preview">{text}</span>
-      </span>
-    </button>
-  )
-}
-
-function CirclesList() {
+/** The „Kreise“ section of the sidebar. */
+export function CirclesNav() {
   const query = useSignal('')
   const all = circles.value
   const shown = all.filter((c) => matches(query.value, c.name))
   return (
-    <>
+    <div class="people-nav">
       <div class="people-own">
         <Button kind="main" class="people-wide" onClick={() => (dialog.value = 'startCircle')}>
           <Icons.Plus size={18} /> {texts.list.startCircle}
-        </Button>
-        <Button kind="secondary" class="people-wide" onClick={() => (dialog.value = 'joinCircle')}>
-          <Icons.Link size={18} /> {texts.people.acceptInvite}
         </Button>
       </div>
       {all.length > 0 && (
@@ -208,6 +151,6 @@ function CirclesList() {
           </>
         )}
       </div>
-    </>
+    </div>
   )
 }

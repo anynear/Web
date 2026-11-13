@@ -10,9 +10,9 @@ import { formatListTime } from './format'
 import * as Icons from './icons'
 import { AlertsNav } from './Alerts'
 import { FilesNav } from './Files'
-import { PeopleNav } from './People'
+import { CirclesNav, NewMessageNav } from './People'
 import { MainHeader } from './MainMenu'
-import { chatSearch, dialog, pane, section } from './nav'
+import { chatSearch, newMessage, pane, section } from './nav'
 import { CrashCard } from './CrashReport'
 
 interface Entry {
@@ -64,12 +64,12 @@ export function ConversationList() {
     section.value = 'alerts'
     if (pane.value === 'settings' || pane.value === 'support') pane.value = 'chat'
   }
-  const goPeople = () => {
-    section.value = 'people'
+  const goCircles = () => {
+    section.value = 'circles'
     if (pane.value === 'settings' || pane.value === 'support') pane.value = 'chat'
   }
   const title =
-    section.value === 'files' ? texts.nav.files : section.value === 'alerts' ? texts.nav.alerts : section.value === 'people' ? texts.nav.people : texts.nav.messages
+    section.value === 'files' ? texts.nav.files : section.value === 'alerts' ? texts.nav.alerts : section.value === 'circles' ? texts.nav.circles : newMessage.value ? texts.list.newMessage : texts.nav.messages
   return (
     <>
     <nav class="rail" aria-label={texts.appName}>
@@ -78,8 +78,8 @@ export function ConversationList() {
         <button type="button" role="tab" aria-selected={section.value === 'messages'} class={`rail-item ${section.value === 'messages' ? 'active' : ''}`} onClick={() => { section.value = 'messages'; if (pane.value === 'settings' || pane.value === 'support') pane.value = 'chat' }}>
           <Icons.Chat /> <span>{texts.nav.messages}</span>
         </button>
-        <button type="button" role="tab" aria-selected={section.value === 'people'} class={`rail-item ${section.value === 'people' ? 'active' : ''}`} onClick={goPeople}>
-          <Icons.Person /> <span>{texts.nav.people}</span>
+        <button type="button" role="tab" aria-selected={section.value === 'circles'} class={`rail-item ${section.value === 'circles' ? 'active' : ''}`} onClick={goCircles}>
+          <Icons.Circle /> <span>{texts.nav.circles}</span>
         </button>
         <button type="button" role="tab" aria-selected={section.value === 'files'} class={`rail-item ${section.value === 'files' ? 'active' : ''}`} onClick={goFiles}>
           <Icons.Folder /> <span>{texts.nav.files}</span>
@@ -97,24 +97,20 @@ export function ConversationList() {
       <MainHeader title={title} />
       {section.value === 'files' ? (
         <FilesNav />
-      ) : section.value === 'people' ? (
-        <PeopleNav />
+      ) : section.value === 'circles' ? (
+        <CirclesNav />
       ) : section.value === 'alerts' ? (
         <AlertsNav />
+      ) : newMessage.value ? (
+        <NewMessageNav />
       ) : (
         <>
           <CrashCard />
           <div class="list-tools">
             <input class="input search" type="search" placeholder={texts.list.search} value={query.value} onInput={(e) => (query.value = e.currentTarget.value)} />
             <div class="list-actions">
-              <button type="button" class="list-action" onClick={() => (dialog.value = 'startCircle')}>
-                <Icons.Plus size={18} /> {texts.list.startCircle}
-              </button>
-              <button type="button" class="list-action" onClick={() => (dialog.value = 'joinCircle')}>
-                <Icons.Link size={18} /> {texts.list.joinCircle}
-              </button>
-              <button type="button" class="list-action" onClick={() => (dialog.value = 'addContact')}>
-                <Icons.Person size={18} /> {texts.list.addContact}
+              <button type="button" class="list-action" onClick={() => (newMessage.value = true)}>
+                <Icons.Edit size={18} /> {texts.list.newMessage}
               </button>
             </div>
           </div>

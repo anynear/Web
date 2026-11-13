@@ -4,7 +4,7 @@ anynear is in beta and has not been independently audited. Reports of security p
 
 ## Reporting a vulnerability
 
-Please write to **support@anynear.app**, in English or German. Do not open a public issue or pull request for a
+Please write to **security@anynear.app**, in English or German. Do not open a public issue or pull request for a
 vulnerability.
 
 In your report, describe:

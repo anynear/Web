@@ -1230,17 +1230,17 @@ export async function replaceStored(scope: StoreScope, f: StoredFile, image: { b
   }
 }
 
-export async function putStored(scope: StoreScope, p: Prepared, name: string): Promise<boolean> {
-  if (!core) return false
+export async function putStored(scope: StoreScope, p: Prepared, name: string): Promise<string | null> {
+  if (!core) return null
   const id = crypto.randomUUID()
   const bytes = p.bytes as unknown as Int8Array
   const added = BigInt(Date.now())
   try {
     const ref = scope === 'mine' ? await core.storePut(id, bytes, name, p.type, added, p.width, p.height) : await core.circleStorePut(scope, id, bytes, name, p.type, added, p.width, p.height)
-    if (ref == null) return false
-    return await stored(ref)
+    if (ref == null) return null
+    return (await stored(ref)) ? id : null
   } catch {
-    return false
+    return null
   }
 }
 
