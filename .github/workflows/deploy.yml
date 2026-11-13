@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.event_name == 'push' && github.sha || github.ref }}
   # Do not cancel a running production deployment; the next merge waits.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

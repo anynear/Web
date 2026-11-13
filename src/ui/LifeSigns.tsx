@@ -36,14 +36,22 @@ import { Button, Dialog } from './components'
 import { formatDateTime, formatTime } from './format'
 import { dialog, section } from './nav'
 
-/** Section at the top of the left list in „Meldungen“. */
+/** Whether an own check-in is running; then „Lebenszeichen starten“ is not in the ⋮ menu (ADR 0101). */
+export function ownRunning(): boolean {
+  return lifeSigns.value.some((s) => s.own && s.phase !== ENDED)
+}
+
+/**
+ * Section at the top of the left list in „Meldungen“, only while one runs. Starting is in the ⋮ menu (ADR 0101), the
+ * dialog opens over `dialog = 'startLifeSign'` in [AlertsDialogs].
+ */
 export function LifeSignsSection() {
   const all = lifeSigns.value
   const own = all.find((s) => s.own && s.phase !== ENDED)
   const watched = all.filter((s) => !s.own && s.phase !== ENDED)
-  const [starting, setStarting] = useState(false)
   const [ending, setEnding] = useState(false)
   const l = texts.lifeSigns
+  if (!own && watched.length === 0) return null
   return (
     <>
       <h2 class="section-title nav-title">{l.section}</h2>
@@ -51,19 +59,9 @@ export function LifeSignsSection() {
         {watched.map((s) => (
           <WatchedCard key={s.id} s={s} />
         ))}
-        {own ? (
-          <OwnCard s={own} onEnd={() => setEnding(true)} />
-        ) : (
-          <div class="nav-note">
-            <Button kind="secondary" onClick={() => setStarting(true)}>
-              {l.start}
-            </Button>
-            <p class="muted small">{l.intro}</p>
-          </div>
-        )}
+        {own && <OwnCard s={own} onEnd={() => setEnding(true)} />}
         <p class="muted small nav-note">{l.browserNote}</p>
       </div>
-      {starting && <StartDialog onClose={() => setStarting(false)} />}
       {ending && own && <EndDialog s={own} onClose={() => setEnding(false)} />}
     </>
   )
@@ -153,7 +151,7 @@ function WatchedCard({ s }: { s: LifeSign }) {
   )
 }
 
-function StartDialog({ onClose }: { onClose: () => void }) {
+export function StartDialog({ onClose }: { onClose: () => void }) {
   const l = texts.lifeSigns
   const usable = choices(circles.value)
   const known = (id: string) => (usable.find((c) => c.id === id)?.members.length ?? 1) - 1
@@ -182,6 +180,9 @@ function StartDialog({ onClose }: { onClose: () => void }) {
           if (ok) onClose()
         }}
       >
+        {/* The explanation stood under the start button before; since starting is in the ⋮ menu it is here (ADR 0101). */}
+        <p class="muted small">{l.intro}</p>
+        <p class="muted small">{l.browserNote}</p>
         {usable.length === 0 ? (
           <>
             {/* No circle yet: straight to creating one (afterwards it opens with the invitation). */}

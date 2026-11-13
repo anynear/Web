@@ -45,7 +45,7 @@ import { regionView } from '../core/regions'
 import { pushState } from '../core/session'
 import { Button, CopyLink, Dialog, Qr, Row, Section, Spinner } from './components'
 import { ActionTile } from './Details'
-import { LifeSignsSection } from './LifeSigns'
+import { LifeSignsSection, StartDialog } from './LifeSigns'
 import { formatDateTime, formatListTime, formatShortDate, splitLinks } from './format'
 import * as Icons from './icons'
 import { alertSel, dialog, section } from './nav'
@@ -69,16 +69,6 @@ export function AlertsNav() {
   const regionKnown = regionView(region.value, locationPermission.value, locating.value) === 'region'
   return (
     <>
-      <div class="list-tools">
-        <div class="list-actions">
-          <button type="button" class="list-action" onClick={() => (dialog.value = 'createChannel')}>
-            <Icons.Plus size={18} /> {texts.alerts.createChannel}
-          </button>
-          <button type="button" class="list-action" onClick={() => (dialog.value = 'joinChannel')}>
-            <Icons.Link size={18} /> {texts.alerts.joinChannel}
-          </button>
-        </div>
-      </div>
       <div class="files-nav">
         <LifeSignsSection />
         {active.value.length > 0 && (
@@ -442,7 +432,10 @@ export function ChannelPage({ id }: { id: string }) {
         </button>
         <button type="button" class="chat-title" onClick={() => setDetails(true)} title={texts.alerts.viewChannel}>
           <span>
-            <span class="chat-name">{channel.name}</span>
+            <span class="chat-name">
+              <span>{channel.name}</span>
+              <Icons.Forward size={18} />
+            </span>
             <span class="chat-sub">{subtitle}</span>
           </span>
         </button>
@@ -684,6 +677,7 @@ export function AlertsDialogs() {
   }
   if (dialog.value === 'createChannel') return <CreateChannelDialog close={close} />
   if (dialog.value === 'joinChannel') return <JoinChannelDialog close={close} />
+  if (dialog.value === 'startLifeSign') return <StartDialog onClose={close} />
   return null
 }
 
