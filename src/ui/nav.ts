@@ -2,14 +2,14 @@
 import { signal } from '@preact/signals'
 import { isRadioPath } from '../core/radioSetup'
 
-export type Section = 'messages' | 'people' | 'files' | 'alerts'
+export type Section = 'messages' | 'circles' | 'files' | 'alerts'
 export type Pane = 'chat' | 'details' | 'settings' | 'support' | 'radio'
-export type DialogKind = 'startCircle' | 'joinCircle' | 'addContact' | 'createChannel' | 'joinChannel' | 'ownContact' | null
+export type DialogKind = 'startCircle' | 'joinCircle' | 'addContact' | 'createChannel' | 'joinChannel' | 'ownContact' | 'startLifeSign' | null
 
-/** Section of the sidebar: messages, people, storage (with passwords) or alerts, like the tabs of the app. */
+/** Section of the sidebar: messages, circles (ADR 0100), storage (with passwords) or alerts, like the tabs of the app. */
 export const section = signal<Section>('messages')
-/** Under „Menschen“: contacts or circles, like the toggle of the app. */
-export const peopleTab = signal<'contacts' | 'circles'>('contacts')
+/** „Neue Nachricht“ open above „Nachrichten“: choosing whom to write to (contacts and circles). */
+export const newMessage = signal(false)
 /** In the storage: `mine`, `passwords` or a circle ID; `null` = nothing chosen. */
 export const filesSel = signal<string | null>(null)
 /** Search across all storages (ADR 0070 §7); not empty: the hits are on the right. */

@@ -1,6 +1,5 @@
 # Trademark: anynear
 
-> Draft: have this reviewed legally before publication; add owner and registration status.
 
 The source code of this repository is licensed under GPL-3.0-or-later (see [LICENSE](LICENSE)). The licence governs the
 copyright in the code. **It grants no rights to names, logos or other marks.**

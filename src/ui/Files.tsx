@@ -237,6 +237,7 @@ export function StoreList({ scope, compact = false, intro }: { scope: StoreScope
     }
     const all = [...list]
     uploading.value += all.length
+    let added: string | null = null
     for (const f of all) {
       try {
         const p = await prepareFile(f, true)
@@ -251,7 +252,9 @@ export function StoreList({ scope, compact = false, intro }: { scope: StoreScope
         // Pictures keep their name, only with .jpg, because they are saved anew as JPEG (as in the app).
         const stem = f.name.replace(/\.[^.]+$/, '')
         const name = p.type === 'jpg' ? (stem ? `${stem}.jpg` : texts.files.photoName(dateFmt.format(f.lastModified || Date.now()))) : f.name
-        if (!(await putStored(scope, p, name))) {
+        const id = await putStored(scope, p, name)
+        if (id) added = id
+        else {
           const full = storage.value && spaceState(storage.value) === 'full'
           problem.value = full ? texts.files.storageFull : texts.files.notAccepted
         }
@@ -260,6 +263,10 @@ export function StoreList({ scope, compact = false, intro }: { scope: StoreScope
       }
     }
     await load()
+    // Open what was just added, so it does not have to be searched for in the list (as in the app).
+    const now = files.value
+    const fresh = added && Array.isArray(now) ? now.find((f) => f.file === added) : undefined
+    if (fresh) viewStored(scope, fresh)
   }
 
   const all = files.value
@@ -725,6 +732,23 @@ function isPhotoFile(f: StoredFile): boolean {
   return f.doc ? f.doc.kind === 'photo' : f.type === 'jpg'
 }
 
+/** Shows a stored file in the app (Viewer), never in a new tab. */
+function viewStored(scope: StoreScope, f: StoredFile) {
+  const mime = mimeOf(f.type, f.name)
+  openViewer([
+    {
+      kind: f.type === 'jpg' ? 'photo' : f.type === 'pdf' ? 'pdf' : 'file',
+      name: FileTitles.getInstance().shown(f.title, f.name),
+      size: Number(f.size),
+      own: true,
+      load: async () => {
+        const b = await fetchStored(scope, f)
+        return b ? URL.createObjectURL(new Blob([b as BlobPart], { type: mime })) : null
+      },
+    },
+  ])
+}
+
 function StoreItem({
   scope,
   f,
@@ -765,20 +789,7 @@ function StoreItem({
   }, [f.entryId])
 
   /** Tapping shows the file in the app (Viewer), never in a new tab. */
-  function view() {
-    openViewer([
-      {
-        kind: isPhoto ? 'photo' : f.type === 'pdf' ? 'pdf' : 'file',
-        name: shownName,
-        size: Number(f.size),
-        own: true,
-        load: async () => {
-          const b = await fetchStored(scope, f)
-          return b ? URL.createObjectURL(new Blob([b as BlobPart], { type: mime })) : null
-        },
-      },
-    ])
-  }
+  const view = () => viewStored(scope, f)
 
   /** Save explicitly to the device (button „Speichern“). */
   async function save() {

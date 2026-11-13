@@ -146,7 +146,10 @@ export function Chat({ conv }: { conv: ConvKey }) {
         <button type="button" class="chat-title" onClick={() => (pane.value = 'details')} title={kind === 'circle' ? texts.circle.details : texts.contact.details}>
           <Avatar id={id} kind={kind === 'circle' ? 'circle' : 'person'} size={40} image={circle?.image ?? person?.image ?? null} />
           <span>
-            <span class="chat-name">{convName(conv)}</span>
+            <span class="chat-name">
+              <span>{convName(conv)}</span>
+              <Icons.Forward size={18} />
+            </span>
             <span class="chat-sub">{subtitle}</span>
           </span>
         </button>
