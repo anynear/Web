@@ -124,8 +124,9 @@ the storage secret, which is kept in `localStorage`; anyone who gets code into t
 
 The web app runs at **https://web.anynear.app**. The workflow `.github/workflows/deploy.yml` builds and tests every
 pull request and every merge to `main` (core, tests, production build), but publishes nothing in the process.
-Publishing happens only by hand through “Run workflow”: with `main` as build `X.Y.Z-<hash>` (latest tag `vX.Y.Z` plus
-commit) or with a tag `vX.Y.Z` on `main` as the new version `X.Y.Z`; the workflow aborts for tags outside `main`. The
+Publishing happens only by hand through “Run workflow”: with `main` as pre-release `X.Y.Z-pre.<build>` of the open version
+(the highest `release-notes/X.Y.Z.md` without a tag, `scripts/version.sh`) or with a tag `vX.Y.Z` on `main` as the
+version `X.Y.Z`; the workflow aborts for tags outside `main`. The
 finished `dist/` is uploaded. The secrets and variables needed for this are listed in the header of the workflow.
 
 Changes to `main` are made only by pull request with green CI; nobody pushes to `main` directly.

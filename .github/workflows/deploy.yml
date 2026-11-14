@@ -1,9 +1,10 @@
 # Builds the web app and puts it into the deploybase project (target web.anynear.app).
 #
 # Pull requests and merges to main: build the ANMP core, tests, production build, without publishing. Upload to
-# deploybase (production) only by hand: “Run workflow” with main as build X.Y.Z-<hash> (latest tag vX.Y.Z on main
-# plus commit) or with a tag vX.Y.Z without suffix on main as the new version X.Y.Z. The core comes from the repos
-# ANMP and ANDP, read with the token of a GitHub App (secrets CI_APP_ID, CI_APP_KEY; Contents read only).
+# deploybase (production) only by hand: “Run workflow” with main as pre-release X.Y.Z-pre.<build> of the open version (the
+# highest release-notes/X.Y.Z.md without a tag, scripts/version.sh) or with a tag vX.Y.Z without suffix on main as the
+# version X.Y.Z. The core comes from the repos ANMP and ANDP, read with the token of a GitHub App (secrets CI_APP_ID,
+# CI_APP_KEY; Contents read only).
 #
 # For the deployment: secret DEPLOYBASE_API_KEY and variable DEPLOYBASE_PROJECT_ID. If one of them is missing,
 # the run ends after the build with a notice.
@@ -80,18 +81,24 @@ jobs:
         working-directory: Web
         run: npm test
 
-      - name: Production build
-        working-directory: Web
-        run: npm run build
-
-      - name: Check the tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Publishing (Run workflow with main or a tag vX.Y.Z): version and pre-release from scripts/version.sh, which also stops for
+      # tags outside main; both need complete release notes in release-notes/X.Y.Z.md (README there).
+      - name: Version
+        id: version
+        if: github.event_name == 'workflow_dispatch' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
         working-directory: Web
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Tag $GITHUB_REF_NAME does not have the form vX.Y.Z (without a suffix)." >&2; exit 1; }
-          git merge-base --is-ancestor HEAD origin/main || { echo "::error::Tag $GITHUB_REF_NAME is not on main." >&2; exit 1; }
-          # A version needs its release notes in release-notes/X.Y.Z.md (README there).
-          scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
+          set -euo pipefail
+          scripts/version.sh > "$RUNNER_TEMP/version"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/version"
+          scripts/release-notes.sh "$(sed -n 's/^marketing=//p' "$RUNNER_TEMP/version")" > /dev/null
+
+      - name: Production build
+        working-directory: Web
+        env:
+          # Empty outside a publishing run; vite.config.ts then works out the same version itself.
+          APP_VERSION: ${{ steps.version.outputs.name }}
+        run: npm run build
 
       # The deploybase CLI runs with `go run`; Go is not preinstalled on every runner.
       - uses: actions/setup-go@v5
@@ -113,12 +120,8 @@ jobs:
             exit 0
           fi
           # Official deploybase CLI (docs.deploybase.eu/reference/cli), upload of the finished dist/.
-          # Label like the version in vite.config.ts: tag vX.Y.Z or build vX.Y.Z-<hash>.
-          label="$GITHUB_REF_NAME"
-          if [ "$GITHUB_REF_TYPE" != tag ]; then
-            base=$(git tag --merged HEAD --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-            label="${base:-v0.0.0}-$(git rev-parse --short=7 HEAD)"
-          fi
+          # Label like the version in the build: tag vX.Y.Z or pre-release vX.Y.Z-pre.<build>.
+          label="${{ steps.version.outputs.tag }}"
           # Fixed version (not @latest): this step holds DEPLOYBASE_API_KEY, so only a known CLI may run here. Go checks
           # the module against sum.golang.org. Raise it on purpose after reading the changes.
           go run codeberg.org/deploybase/deploybase-cli@v0.5.0 deploy ./dist \
@@ -128,7 +131,7 @@ jobs:
             -H "Authorization: Bearer $DEPLOYBASE_API_KEY" -o /dev/null -w "Purge cache: HTTP %{http_code}\n" || echo "::warning::The cache could not be purged"
 
   # GitHub release of a version with the release notes from release-notes/X.Y.Z.md; the website shows the same text.
-  # Only after publishing by hand with a tag vX.Y.Z. Builds of main get no release.
+  # Only after publishing by hand with a tag vX.Y.Z. Pre-releases from main get no GitHub release.
   release:
     needs: build
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
