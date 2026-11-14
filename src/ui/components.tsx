@@ -5,7 +5,7 @@ import QRCode from 'qrcode'
 import { texts } from '../i18n'
 import * as Icons from './icons'
 
-/** `main` is the one orange main action of a screen (Docs/marke §5). */
+/** `main` is the one orange main action of a screen (brand guidelines §5). */
 export type ButtonKind = 'main' | 'primary' | 'secondary' | 'quiet' | 'danger'
 
 export function Button({

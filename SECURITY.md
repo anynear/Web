@@ -1,6 +1,6 @@
 # Security
 
-anynear is in beta and has not been independently audited. Reports of security problems are very welcome.
+Reports of security problems are very welcome.
 
 ## Reporting a vulnerability
 
@@ -27,7 +27,7 @@ details.
 
 ## Recognition
 
-There is no bug bounty. If you wish, we name you when the fix is published.
+There is no bug bounty. If you wish, we credit you by name when the fix is published.
 
 ## Background
 
