@@ -1,12 +1,12 @@
 anynear Web
 Copyright 2026 Kevin Schu
 
-Licensed under GPL-3.0-or-later; a commercial licence is available (COMMERCIAL.md).
+Licensed under GPL-3.0-or-later; a commercial license is available (COMMERCIAL.md).
 
-Contains the ANMP core (GPL-3.0-or-later) and libraries under MIT and Apache licences,
+Contains the ANMP core (GPL-3.0-or-later) and libraries under MIT and Apache licenses,
 see package.json. The typeface Inter is licensed under the SIL Open Font License (public/fonts/OFL.txt).
 
-Districts and municipality centre points for official warnings (src/core/regions/): Gemeindeverzeichnis GV-ISys
+Districts and municipality center points for official warnings (src/core/regions/): Gemeindeverzeichnis GV-ISys
 (municipality directory), territorial status 31.12.2025, © Statistisches Bundesamt (Destatis), 2026, on behalf of the
 Herausgebergemeinschaft Statistische Ämter des Bundes und der Länder; coordinates: Bundesamt für Kartographie und
 Geodäsie (BKG). Reproduction and distribution, also in part, are permitted provided the source is cited.

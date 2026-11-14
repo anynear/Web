@@ -1,30 +1,33 @@
 # anynear in the browser
 
-[anynear](https://anynear.app) is an app that connects a circle of people, for example a family, neighbours or a club:
+[anynear](https://anynear.app) is an app that connects a circle of people, for example a family, neighbors or a club:
 messages, a shared storage for files and passwords, all end-to-end encrypted.
 
 This repository contains the anynear web app (https://web.anynear.app): your circles and contacts on the computer.
 The browser is paired with anynear on the phone by QR code and is then one more device of the same person.
 There is no standalone anynear in the browser.
 
-**Status: beta.** The software has not been independently reviewed (no external security audit). The procedures and
-their known limits are described at https://anynear.app/en/technology/. Please report vulnerabilities as described in
-[`SECURITY.md`](SECURITY.md). If you want to contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The procedures and their known limits are described at https://anynear.app/en/technology/. Please report
+vulnerabilities as described in [`SECURITY.md`](SECURITY.md). If you want to contribute, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-ADR numbers in comments and texts (e.g. “ADR 0059”) are internal decision numbers; the documents behind them are not
-in this repository.
+ADR numbers in comments and texts (e.g. “ADR 0059”) refer to the project's internal decision records; these documents
+are not published.
 
 ## What it can do
 
-- Pairing: QR code `https://anynear.app/p#…`, the phone scans it under “More” → “My devices” → “Add a device”.
-- Found circles, join by invitation link, invite (link and QR), view and remove members, leave; rename a circle,
+- Pairing: QR code `https://anynear.app/p#…`, scanned with the phone's camera or in the app under “More” → “My devices”
+  → “Add a device”; the phone and the browser show the same number to compare (ADR 0093).
+- Guided steps after pairing: notifications and official warnings.
+- Start circles, join by invitation link, invite (link and QR), view and remove members, leave; rename a circle,
   circle picture, invalidate old invitation links.
-- Own contact link, add and remove a contact by link, direct messages.
-- “People” as in the app: contacts and circles with a switch, “Share my contact” (QR code and link).
+- Own contact link (QR code and link, in the settings), add and remove a contact by link, direct messages.
+- “Circles” as in the app: start, join and open circles; “New message” lists circles and contacts to write to, with
+  “Add a contact”.
 - Invitation links to circles, contacts and channels appear in the chat as a card with “Join”, “Add”, “Subscribe” or
   “Open” (`previewLink` of the core).
 - Messages with states as in the app (Sending, Sent, Delivered, Read, “Read by 1 of 3”), reactions, clickable web
-  addresses, search in the chat.
+  addresses, replies with a quote of the original message, search in the chat.
 - Send attachments (up to 5, 10 MB each; photos reduced in size and without metadata) and view them.
 - Alerts (ADR 0062): active alarms and warnings at the top, channels with their latest alert, history with state
   (active, all clear, expired), pictures and link; create a channel, subscribe by link (paste it or `/a#…` as a deep
@@ -34,16 +37,24 @@ in this repository.
   the district is saved; without a district the web app neither shows nor announces any official warning. Every alert
   shows a notice (including info alerts and your own, once each), which can be switched off per channel; alarms stay on
   screen, but in the browser they do not become loud as they do in the app.
-- Storage: My files and the storages of the circles, upload (also by dragging), open, save, delete.
+- Files: “My files” and the files of the circles, upload (also by dragging), open, save, search, kinds and titles,
+  sorting, photo view, rotate photos, bin (deleted files stay for a few days), status in the network, usage of the
+  quota and a preview of the planned subscription plans (prices from `anynear.app/v1/abo.json`).
 - Passwords as in the app, unlocked with the computer's lock (passkey with PRF): view, copy, create, change and delete
   logins, one-time codes.
 - “Set up a radio” (menu ⋮, also at `/radio` without pairing, ADR 0095): installs Meshtastic on a radio on the
   USB cable in Chrome or Edge on a computer (WebSerial); ESP32 through the ROM loader of the core, nRF52 as a file on
   the radio's drive (File System Access API, otherwise download). Pairing and settings afterwards are done by the app.
-- Profile picture and name, browser notifications while the tab is open, installable as an app (PWA), German and
-  English, “Delete anynear from this browser”.
-- Notice “Please update anynear” with “Reload” as soon as the relays require a newer version (`updateNeeded` of the
-  core, ADR 0061 decision 13).
+- Check-ins (ADR 0083): start a check-in for a circle, follow the check-ins of others and respond (“I'll check”);
+  in the browser, questions and warnings only arrive while the web app is open.
+- Help: “Report a problem” and “Ask us” become a chat with the anynear support; crash reports are shown first and sent
+  only on request (ADR 0082).
+- Usage statistics: a few numbers once a day, without names or content, can be switched off (ADR 0045).
+- Profile picture and name, browser notifications (while the tab is open, and through Web Push also with the tab
+  closed if the relays offer it; then only “New message”, without sender or text), installable as an app (PWA), German
+  and English, “Delete anynear from this browser”.
+- Update notice (ADR 0096): announced in advance with a date, then “Please update anynear.” with “Reload” as soon as a
+  newer version is required; a required update reloads the page once by itself.
 
 ## Structure
 
@@ -54,7 +65,7 @@ in this repository.
 | `src/core/db.ts`, `storage.ts` | History, files you sent yourself and the encrypted files of the core (including alerts) in IndexedDB; keys and state of the core in `localStorage` (prefix `app:`); the IndexedDB is called `web` |
 | `src/core/vault.ts`, `passwords.ts`, `lock.ts` | Password file in the format of the app, sync through the password space, lock by passkey with PRF |
 | `src/core/alerts.ts`, `channels.ts` | Alerts and channels: rules as in the app (pure), state and actions from the core |
-| `src/core/regions.ts`, `regions/` | District for the approximate location (nearest municipality centre point); table as CSV, copy from the app, loaded only when needed |
+| `src/core/regions.ts`, `regions/` | District for the approximate location (nearest municipality center point); table as CSV, copy from the app, loaded only when needed |
 | `src/core/media.ts` | Reduce photos in size, file types, limits as in the app |
 | `src/core/radioSetup.ts` | Radio setup over USB: serial line for the loader of the core, radios.json with fallback, writing to the drive |
 | `src/ui/` | User interface (Preact): pairing, overview, conversation, details, settings, dialogs |
@@ -99,9 +110,10 @@ shows “This browser is too old”.
 ## Security
 
 The keys of the device are stored in `localStorage`. Therefore: a strict Content-Security-Policy in `index.html` (own
-scripts only, connections only to `anynear.net` and `*.relay.anynear.net`), no third-party scripts or trackers, and a
-notice during pairing that anynear should run here only on your own computer. The browser is removed on the phone under
-“My devices”. Links for sharing are on `anynear.app`; the core also recognises them on `anynear.net`.
+scripts only; connections only to `anynear.net` and `*.relay.anynear.net`, to `anynear.app` for public lists such as
+plans, support link and radios, and to `meshtastic.github.io` for the Meshtastic software when setting up a radio), no
+third-party scripts or trackers, and a notice during pairing that anynear should run here only on your own computer.
+The browser is removed on the phone under “My devices”. Links for sharing are on `anynear.app`; the core also recognizes them on `anynear.net`.
 
 Passwords: in the browser, `pv` is stored only encrypted with a key from the PRF extension of a passkey of this site;
 without Touch ID, Windows Hello or the computer's PIN it cannot be opened. Once unlocked, the logins exist only in the
@@ -118,23 +130,22 @@ finished `dist/` is uploaded. The secrets and variables needed for this are list
 
 Changes to `main` are made only by pull request with green CI; nobody pushes to `main` directly.
 
-## Licence
+## License
 
-GPL-3.0-or-later (`LICENSE`, `NOTICE`); a commercial licence is available (`COMMERCIAL.md`). Names and logos are
+GPL-3.0-or-later (`LICENSE`, `NOTICE`); a commercial license is available (`COMMERCIAL.md`). Names and logos are
 excluded (`TRADEMARKS.md`).
 
 For official warnings, the web app determines the district from the approximate location in the browser, using a table
-of municipality centre points under `src/core/regions/` (unchanged copy from the app, generated there with
+of municipality center points under `src/core/regions/` (unchanged copy from the app, generated there with
 `scripts/regions.py`). Source: Gemeindeverzeichnis-Informationssystem GV-ISys (municipality directory), “Alle politisch
 selbständigen Gemeinden mit ausgewählten Merkmalen am 31.12.2025 (4. Quartal)” (file `AuszugGV4QAktuell.xlsx`,
 published January 2026, downloaded on 4 November 2026 from
 [destatis.de](https://www.destatis.de/DE/Themen/Laender-Regionen/Regionales/Gemeindeverzeichnis/Administrativ/Archiv/GVAuszugQ/AuszugGV4QAktuell.html)).
 © Statistisches Bundesamt (Destatis), 2026, on behalf of the Herausgebergemeinschaft Statistische Ämter des Bundes und
-der Länder; geographic centre point coordinates: Bundesamt für Kartographie und Geodäsie (BKG). Reproduction and
+der Länder; geographic center point coordinates: Bundesamt für Kartographie und Geodäsie (BKG). Reproduction and
 distribution, also in part, are permitted provided the source is cited. The source is also cited in the web app under
 “Official warnings” → “More about this”.
 
 ## Open
 
-Notifications without an open tab (Web Push through the relays), recording voice messages, keys as non-exportable
-WebCrypto keys.
+Recording voice messages (received ones can be played), keys as non-exportable WebCrypto keys.

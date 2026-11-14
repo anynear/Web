@@ -1,4 +1,4 @@
-// Generated pictures according to ADR 0012 and Docs/marke §7: circle angular with three rings of arc segments around
+// Generated pictures according to ADR 0012 and the brand guidelines §7: circle angular with three rings of arc segments around
 // a dot, person round with a mirrored box pattern. Colour pairs only from the palette; own photo if there is one.
 import { useEffect, useState } from 'preact/hooks'
 import type { ImageRef } from 'anmp-core'

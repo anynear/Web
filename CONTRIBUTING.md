@@ -31,10 +31,11 @@ npm run build  # type check and production build into dist/
 
 Please do not report vulnerabilities in issues or pull requests; follow [`SECURITY.md`](SECURITY.md).
 
-## Licence and Contributor License Agreement
+## License and Contributor License Agreement
 
 Contributions need your agreement to the Contributor License Agreement in [CLA.md](CLA.md): you keep the copyright and
-give the project a licence that also allows it to license your contribution under other terms. A bot asks for your
-agreement in your first pull request; you agree by commenting the sentence it shows. Accepted contributions stay
-available under GPL-3.0-or-later, like the rest of the repository. Because of this agreement, the project can also offer the code
-under a commercial licence ([COMMERCIAL.md](COMMERCIAL.md)). Names and logos are excluded (`TRADEMARKS.md`).
+give the project a license that also allows it to license your contribution under other terms. A bot asks for your
+agreement in your first pull request; you agree by posting the sentence it shows as a comment. Accepted contributions
+stay available under GPL-3.0-or-later, like the rest of the repository. Because of this agreement, the project can also
+offer the code under a commercial license ([COMMERCIAL.md](COMMERCIAL.md)). Names and logos are excluded
+(`TRADEMARKS.md`).

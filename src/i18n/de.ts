@@ -1,4 +1,4 @@
-// German texts. Wording according to Docs/marke/README.md and as in the app (App/shared/…/i18n).
+// German texts. Wording according to the anynear brand guidelines and as in the app.
 export const de = {
   appName: 'anynear',
   loading: 'anynear startet …',

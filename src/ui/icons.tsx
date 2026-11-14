@@ -1,4 +1,4 @@
-// Line icons as in the app (AppIcons): 2 px stroke, round ends, colour from the text (Docs/marke §7).
+// Line icons as in the app (AppIcons): 2 px stroke, round ends, colour from the text (brand guidelines §7).
 import type { JSX } from 'preact'
 
 type Props = { size?: number; title?: string }
