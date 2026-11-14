@@ -196,6 +196,6 @@ describe('Kanallinks', () => {
     expect(looksLikeChannelLink('https://anynear.app/a#xyz')).toBe(true)
     expect(looksLikeChannelLink('https://anynear.app/k#xyz')).toBe(false)
     expect(looksLikeChannelLink('https://anynear.net/k#xyz')).toBe(false)
-    expect(looksLikeChannelLink('https://pyrsa.net/a#xyz')).toBe(false)
+    expect(looksLikeChannelLink('https://example.net/a#xyz')).toBe(false)
   })
 })

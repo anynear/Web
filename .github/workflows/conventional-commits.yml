@@ -1,0 +1,56 @@
+# Checks that the pull request title and every commit in the pull request follow Conventional Commits
+# (https://www.conventionalcommits.org/en/v1.0.0/): <type>[(scope)][!]: <description>.
+# The title matters because a squash merge uses it as the commit message on main.
+# Merge commits and git's default "Revert "…"" are accepted; fixup!/squash!/amend! commits are not (squash them first).
+name: Conventional Commits
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: conventional-commits-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  check:
+    name: Conventional Commits
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    steps:
+      - name: Check title and commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^()[:space:]]+\))?!?: [^[:space:]]'
+          failed=0
+          check() { # $1 = what, $2 = subject
+            if ! printf '%s\n' "$2" | grep -Eq "$pattern"; then
+              echo "::error::$1 is not a Conventional Commit: $2"
+              failed=1
+            fi
+          }
+          check "Pull request title" "$TITLE"
+          # Subjects of all non-merge commits, one per line: <sha> <subject>
+          gh api "repos/$REPO/pulls/$NUMBER/commits" --paginate \
+            --jq '.[] | select((.parents | length) == 1) | "\(.sha[0:7]) \(.commit.message | split("\n")[0])"' \
+            > "$RUNNER_TEMP/commits.txt"
+          while IFS=' ' read -r sha subject; do
+            case "$subject" in
+              'Revert "'*) ;;
+              *) check "Commit $sha" "$subject" ;;
+            esac
+          done < "$RUNNER_TEMP/commits.txt"
+          if [ "$failed" -ne 0 ]; then
+            echo "Form: <type>[(scope)][!]: <description>, type = build chore ci docs feat fix perf refactor revert style test." >&2
+            echo "Fix the title in the pull request; reword commits with git rebase -i (reword) and push with --force-with-lease." >&2
+            exit 1
+          fi
+          echo "Title and $(wc -l < "$RUNNER_TEMP/commits.txt" | tr -d ' ') commits follow Conventional Commits."
