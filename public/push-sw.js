@@ -1,6 +1,8 @@
 // Web Push for anynear (ADR 0060, ANDP §10.1): the relays send a wake-up without content. The service worker cannot
-// decrypt and shows a neutral notice; the page fetches by itself when opened. If a page is visible,
-// it shows nothing (the page reports new messages itself, with sender and text).
+// decrypt and shows a neutral notice; the page fetches by itself when opened. If a page is visible, the page reports
+// new messages itself (with sender and text), so the notice is closed right away. It is still shown first: Safari and
+// web apps on iPhone, iPad and Mac revoke the push subscription after a few pushes without a notification, and then
+// the relays can no longer wake the closed app (ANDP §10.1, watch "gone").
 /* eslint-env serviceworker */
 
 const TEXTS = {
@@ -16,14 +18,18 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      if (clients.some((c) => c.visibilityState === 'visible')) return
+      const visible = clients.some((c) => c.visibilityState === 'visible')
       const t = texts()
       await self.registration.showNotification(t.title, {
         body: t.body,
         tag: 'push',
         icon: '/icon-192.png',
         badge: '/icon-192.png',
+        silent: visible,
       })
+      if (!visible) return
+      const shown = await self.registration.getNotifications({ tag: 'push' })
+      shown.forEach((n) => n.close())
     })(),
   )
 })

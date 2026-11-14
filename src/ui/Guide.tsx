@@ -4,13 +4,12 @@ import { useEffect, useState } from 'preact/hooks'
 import { texts } from '../i18n'
 import { curatedChannel, enableOfficial, officialAvailable } from '../core/channels'
 import { planGuide, type GuideStep } from '../core/guide'
-import { enableNotifications, finishGuide } from '../core/session'
+import { enableNotifications, finishGuide, notificationsToSwitchOn } from '../core/session'
 import { Button, Spinner } from './components'
 import * as Icons from './icons'
 
 function currentPlan(): GuideStep[] {
-  const ask = typeof Notification !== 'undefined' && Notification.permission === 'default'
-  return planGuide(ask, officialAvailable.peek(), !!curatedChannel.peek())
+  return planGuide(notificationsToSwitchOn(), officialAvailable.peek(), !!curatedChannel.peek())
 }
 
 export function Guide() {

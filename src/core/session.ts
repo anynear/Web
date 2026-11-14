@@ -85,6 +85,7 @@ import {
 } from './support'
 import { LIMITS, shrinkImage, type Prepared } from './media'
 import { browserStorage, clearStorage, local } from './storage'
+import { notificationsOpen, offerGuide } from './guide'
 import { checkUsageStats, startUsageStats } from './usageStats'
 import { onAliveChanged, openLifeSign, startLifeSigns } from './lifesigns'
 
@@ -123,6 +124,25 @@ export const guidePending = signal(local.get('guide') === 'pending')
 export function finishGuide() {
   local.set('guide', null)
   guidePending.value = false
+}
+
+/** Notifications are possible here but not switched on by the web app (step of the guided steps). */
+export function notificationsToSwitchOn(): boolean {
+  const supported = typeof Notification !== 'undefined'
+  return notificationsOpen(supported, supported ? Notification.permission : 'denied', pushState() !== 'off')
+}
+
+/**
+ * Browsers paired before the guided steps existed, or whose permission the browser had already given (then the step was
+ * skipped and notifications stayed off): show the guided steps once more, if notifications are still to switch on.
+ */
+function offerGuideOnce() {
+  if (guidePending.value) return
+  const offer = offerGuide(isPaired(), local.get('guideOffered') === '1', notificationsToSwitchOn())
+  if (isPaired()) local.set('guideOffered', '1')
+  if (!offer) return
+  local.set('guide', 'pending')
+  guidePending.value = true
 }
 export const me = signal<{ deviceId: string; personId: string } | null>(null)
 export const ownName = signal('')
@@ -325,6 +345,7 @@ function isPaired(): boolean {
 
 function afterReady() {
   renewPush()
+  offerGuideOnce()
   watchSupportRequests()
   if (core) startUsageStats(core)
   const own = core?.ownDevices().find((d) => d.deviceId === me.value?.deviceId)
@@ -379,6 +400,7 @@ export async function awaitPairing(): Promise<boolean> {
   local.set('paired', '1')
   // After the restart show the guided steps once (ADR 0073 §9).
   local.set('guide', 'pending')
+  local.set('guideOffered', '1')
   guidePending.value = true
   // The core has to restart with the new keys (AnmpCore.awaitPairing).
   setTimeout(() => location.reload(), 600)
