@@ -187,75 +187,41 @@ export function fromB64u(text: string): Int8Array {
   return out
 }
 
+/** One direct message of the own history as the core takes it (ADR 0107 §6, `WebHistoryItem`). */
+export interface OwnHistoryData {
+  peer: string
+  mid: string
+  ts: number
+  text: string
+  /** Sender's device of a received message; `null` for an own one. */
+  author: string | null
+  replyTo: string | null
+  replyFrom: string | null
+  attachments: Att[]
+}
+
 /**
- * Direct history that an own device sends after being added (topic `history`, app `ChatMessage` as JSON,
- * ADR 0042 §5). Anything unknown is skipped.
+ * The page's own direct messages for the core to keep once as own copies (ADR 0107 §6): what a person sent from one
+ * device lay only in the recipients' mailboxes. System lines, deleted messages and those without message ID stay out.
  */
-export function parseHistory(json: string, ownPerson: string): Msg[] {
-  let items: unknown
-  try {
-    items = JSON.parse(json)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(items)) return []
-  const out: Msg[] = []
-  for (const raw of items) {
-    if (!raw || typeof raw !== 'object') continue
-    const c = raw as Record<string, any>
-    if (c.system || c.conversation?.type !== 'direct') continue
-    const peer = typeof c.conversation.peer === 'string' && c.conversation.peer.startsWith('d:') ? c.conversation.peer.slice(2) : null
-    if (!peer || typeof c.text !== 'string') continue
-    const outgoing = c.outgoing === true
-    const mid: string | undefined = outgoing ? c.localId : c.remoteId ?? undefined
-    const fromDevice: string | undefined = c.fromDevice ?? undefined
-    const fromPerson = outgoing ? ownPerson : typeof c.fromPeer === 'string' ? c.fromPeer.replace(/^d:/, '') : peer
-    // App history: `replyTo` is `{ mid, tag }` (ReplyRef, ADR 0092).
-    const reply = replyOf(c.replyTo?.mid, c.replyTo?.tag)
+export function ownHistoryOf(list: Msg[]): OwnHistoryData[] {
+  const out: OwnHistoryData[] = []
+  for (const m of list) {
+    const { kind, id } = parseKey(m.conv)
+    if (kind !== 'direct' || m.system || m.deleted || !m.mid) continue
+    if (!m.outgoing && !m.fromDevice) continue
     out.push({
-      id: outgoing ? (mid ?? `h|${c.localId}`) : `${fromDevice ?? fromPerson}|${mid ?? c.localId}`,
-      conv: directKey(peer),
-      mid,
-      outgoing,
-      fromDevice,
-      fromPerson,
-      fromName: c.senderName ?? undefined,
-      text: c.text,
-      ts: Number(c.timestampMillis) || 0,
-      status: outgoing ? 'sent' : undefined,
-      recipients: outgoing ? [peer] : undefined,
-      arrivedBy: outgoing && hasAny(c.deliveredTo) ? [peer] : undefined,
-      readBy: outgoing && hasAny(c.readBy) ? [peer] : undefined,
-      unread: false,
-      attachments: Array.isArray(c.attachments) ? c.attachments.map(historyAtt).filter((a: Att | null): a is Att => a !== null) : [],
-      space: c.space ?? undefined,
-      history: true,
-      ...reply,
+      peer: id,
+      mid: m.mid,
+      ts: m.ts,
+      text: m.text,
+      author: m.outgoing ? null : m.fromDevice ?? null,
+      replyTo: m.replyTo ?? null,
+      replyFrom: m.replyFrom ?? null,
+      attachments: m.attachments,
     })
   }
   return out
-}
-
-const KIND_TO_TYPE: Record<string, string> = { IMAGE: 'jpg', PDF: 'pdf', AUDIO: 'm4a', FILE: 'file' }
-
-function historyAtt(a: any): Att | null {
-  const type = KIND_TO_TYPE[a?.kind]
-  if (!type || typeof a.blobId !== 'string' || typeof a.key !== 'string') return null
-  return {
-    id: a.blobId,
-    key: a.key,
-    type,
-    name: a.name ?? '',
-    size: Number(a.size) || 0,
-    width: a.width ?? 0,
-    height: a.height ?? 0,
-    duration: Number(a.durationMillis) || 0,
-    ...(typeof a.hash === 'string' ? { hash: a.hash } : {}),
-  }
-}
-
-function hasAny(v: unknown): boolean {
-  return Array.isArray(v) && v.length > 0
 }
 
 /** Last message and number of unread ones per conversation, for the overview. */

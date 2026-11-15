@@ -8,7 +8,7 @@ import {
   b64u,
   fromB64u,
   newMid,
-  parseHistory,
+  ownHistoryOf,
   reactionSummary,
   shownStatus,
   summarize,
@@ -78,45 +78,21 @@ describe('Reaktionen', () => {
   })
 })
 
-describe('Direktverlauf vom eigenen Gerät', () => {
-  it('liest ChatMessage-JSON der App', () => {
-    const json = JSON.stringify([
-      {
-        localId: 'AAAAAAAAAAA',
-        conversation: { type: 'direct', peer: 'd:PERSON' },
-        fromNodeNum: 0,
-        text: 'Bin gleich da',
-        timestampMillis: 1700000000000,
-        outgoing: true,
-        status: 'READ',
-        readBy: ['d:PERSON'],
-        attachments: [{ blobId: 'B', key: 'K', kind: 'IMAGE', size: 1234, width: 4, height: 3, state: 'DONE' }],
-      },
-      {
-        localId: 'x',
-        conversation: { type: 'direct', peer: 'd:PERSON' },
-        fromNodeNum: 0,
-        text: 'Gut',
-        timestampMillis: 1700000001000,
-        outgoing: false,
-        fromPeer: 'd:PERSON',
-        fromDevice: 'DEV',
-        remoteId: 'MID',
-        space: 'SPACE',
-      },
-      { localId: 'y', conversation: { type: 'circle', circleId: 'c' }, text: 'Kreis', timestampMillis: 1, outgoing: false },
-      { localId: 'z', conversation: { type: 'direct', peer: 'd:PERSON' }, text: '', timestampMillis: 1, outgoing: false, system: { kind: 'x' } },
-    ])
-    const list = parseHistory(json, 'ME')
-    expect(list).toHaveLength(2)
-    expect(list[0]).toMatchObject({ id: 'AAAAAAAAAAA', conv: 'd:PERSON', outgoing: true, fromPerson: 'ME', readBy: ['PERSON'], history: true })
-    expect(list[0].attachments[0]).toMatchObject({ id: 'B', key: 'K', type: 'jpg', size: 1234 })
-    expect(list[1]).toMatchObject({ id: 'DEV|MID', mid: 'MID', outgoing: false, fromPerson: 'PERSON', space: 'SPACE', unread: false })
-  })
-
-  it('übersteht kaputtes JSON', () => {
-    expect(parseHistory('{', 'ME')).toEqual([])
-    expect(parseHistory('{"a":1}', 'ME')).toEqual([])
+describe('Eigener Verlauf für den Kern (ADR 0107)', () => {
+  it('direkte Nachrichten: eigene ohne, fremde mit Verfasser; Kreise, Systemzeilen, gelöschte und ohne ID nicht', () => {
+    const list: Msg[] = [
+      out({ id: 'a', conv: 'd:BEN', mid: 'A', text: 'Hallo', replyTo: 'X', replyFrom: 'T' }),
+      out({ id: 'b', conv: 'd:BEN', mid: 'B', outgoing: false, fromDevice: 'BENDEV', text: 'Hi' }),
+      out({ id: 'c', conv: 'c:k', mid: 'C' }),
+      out({ id: 'd', conv: 'd:BEN', mid: 'D', system: true }),
+      out({ id: 'e', conv: 'd:BEN', mid: 'E', deleted: true }),
+      out({ id: 'f', conv: 'd:BEN', mid: undefined }),
+      out({ id: 'g', conv: 'd:BEN', mid: 'G', outgoing: false }),
+    ]
+    const items = ownHistoryOf(list)
+    expect(items.map((i) => i.mid)).toEqual(['A', 'B'])
+    expect(items[0]).toMatchObject({ peer: 'BEN', author: null, replyTo: 'X', replyFrom: 'T' })
+    expect(items[1]).toMatchObject({ peer: 'BEN', author: 'BENDEV', replyTo: null })
   })
 })
 
@@ -255,15 +231,5 @@ describe('Antworten (ADR 0092)', () => {
     expect(quoteOf(inc({ text: '', attachments: [att('zip')] }))).toMatchObject({ kind: 'attachment', type: 'file' })
     expect(quoteOf(inc({ text: '', deleted: true }))).toMatchObject({ kind: 'deleted', outgoing: false })
     expect(quoteOf(null)).toEqual({ kind: 'missing' })
-  })
-
-  it('Verlauf vom eigenen Gerät behält den Verweis', () => {
-    const json = JSON.stringify([
-      { localId: 'L', conversation: { type: 'direct', peer: 'd:PERSON' }, text: 'Ja', timestampMillis: 1, outgoing: true, replyTo: { mid: 'MID', tag: 'TAG' } },
-      { localId: 'M', conversation: { type: 'direct', peer: 'd:PERSON' }, text: 'Ok', timestampMillis: 2, outgoing: true, replyTo: { mid: 'MID' } },
-    ])
-    const [a, b] = parseHistory(json, 'ME')
-    expect(a).toMatchObject({ replyTo: 'MID', replyFrom: 'TAG' })
-    expect(b.replyTo).toBeUndefined()
   })
 })

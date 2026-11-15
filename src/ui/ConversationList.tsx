@@ -1,10 +1,11 @@
 // Overview „Nachrichten“ as in the app: circles and direct conversations, newest on top, with number of new ones.
 import { computed, useSignal } from '@preact/signals'
+import { useRef } from 'preact/hooks'
 import type { ImageRef } from 'anmp-core'
 import { texts } from '../i18n'
 import { parseKey, type ConvKey } from '../core/messages'
 import { unread as alertsUnread } from '../core/channels'
-import { circles, listedConvs, open, openConv, people, personName, summaries } from '../core/session'
+import { circles, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, stillLoading, summaries } from '../core/session'
 import { Avatar } from './Avatar'
 import { formatListTime } from './format'
 import * as Icons from './icons'
@@ -14,6 +15,8 @@ import { CirclesNav, NewMessageNav } from './People'
 import { MainHeader } from './MainMenu'
 import { chatSearch, newMessage, pane, section } from './nav'
 import { CrashCard } from './CrashReport'
+import { Dialog, Row } from './components'
+import { DeleteHistoryConfirm, LeaveCircleConfirm, toCircle, toPerson } from './Details'
 
 interface Entry {
   key: ConvKey
@@ -46,13 +49,19 @@ const entries = computed<Entry[]>(() => {
       const body = last.text || attachmentPreview(last.attachments)
       preview = last.system ? body : last.outgoing ? `${texts.list.you}: ${body}` : kind === 'circle' ? `${personName(last.fromPerson, last.fromName)}: ${body}` : body
     }
-    if (!last) preview = texts.chat.noMessagesYet
+    // Messages still coming after the emergency card: „Wird geladen …“ instead of „Noch keine Nachrichten“ (ADR 0107 §8).
+    if (!last) preview = stillLoading(key) ? texts.list.loading : texts.chat.noMessagesYet
     return { key, name, kind, image, preview, ts: last?.ts ?? 0, unread: s?.unread ?? 0 }
   }
 })
 
 export function ConversationList() {
   const query = useSignal('')
+  // Right click or long press on a row (FUT 14.11.2026): the actions one looks for here, with the same confirmations
+  // as on the circle and contact page.
+  const actionsFor = useSignal<Entry | null>(null)
+  const ask = useSignal<{ entry: Entry; what: 'leave' | 'history' } | null>(null)
+  const longPress = useLongPress((e: Entry) => (actionsFor.value = e))
   const q = query.value.trim().toLowerCase()
   // As in the app: search in names and last message.
   const shown = q ? entries.value.filter((e) => e.name.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q)) : entries.value
@@ -106,6 +115,8 @@ export function ConversationList() {
       ) : (
         <>
           <CrashCard />
+          {/* New device or back from the emergency card: the messages are still coming (ADR 0107 §8). */}
+          {(loadingMailbox.value || loadingCircles.value.length > 0) && <p class="hint">{texts.list.messagesLoading}</p>}
           <div class="list-tools">
             <input class="input search" type="search" placeholder={texts.list.search} value={query.value} onInput={(e) => (query.value = e.currentTarget.value)} />
             <div class="list-actions">
@@ -132,10 +143,16 @@ export function ConversationList() {
                     class={`conv ${openConv.value === e.key ? 'active' : ''}`}
                     aria-current={openConv.value === e.key ? 'true' : undefined}
                     onClick={() => {
+                      if (longPress.fired()) return
                       pane.value = 'chat'
                       chatSearch.value = false
                       open(e.key)
                     }}
+                    onContextMenu={(ev) => {
+                      ev.preventDefault()
+                      actionsFor.value = e
+                    }}
+                    {...longPress.handlers(e)}
                   >
                     <Avatar id={parseKey(e.key).id} kind={e.kind} image={e.image} />
                     <span class="conv-body">
@@ -156,8 +173,75 @@ export function ConversationList() {
         </>
       )}
     </nav>
+    {actionsFor.value && <ConvActions entry={actionsFor.value} onClose={() => (actionsFor.value = null)} onAsk={(what) => (ask.value = { entry: actionsFor.value!, what })} />}
+    {ask.value?.what === 'leave' && (() => {
+      const c = circles.value.find((x) => x.id === parseKey(ask.value!.entry.key).id)
+      return c ? <LeaveCircleConfirm circle={c} onClose={() => (ask.value = null)} /> : null
+    })()}
+    {ask.value?.what === 'history' && (
+      <DeleteHistoryConfirm id={parseKey(ask.value.entry.key).id} name={ask.value.entry.name} onClose={() => (ask.value = null)} />
+    )}
     </>
   )
+}
+
+function ConvActions({ entry, onClose, onAsk }: { entry: Entry; onClose: () => void; onAsk: (what: 'leave' | 'history') => void }) {
+  const { id } = parseKey(entry.key)
+  const circle = entry.kind === 'circle' ? circles.value.find((c) => c.id === id) : undefined
+  const choose = (action: () => void) => {
+    action()
+    onClose()
+  }
+  return (
+    <Dialog title={entry.name} onClose={onClose}>
+      <div class="dialog-body">
+        <div class="card">
+          {entry.kind === 'circle' ? (
+            <>
+              <Row icon={<Icons.Circle />} title={texts.circle.details} onClick={() => choose(() => toCircle(id))} />
+              {circle && (
+                <Row icon={<Icons.Trash />} title={<span class="danger-text">{circle.removed ? texts.circle.removeFromList : texts.circle.leave}</span>} onClick={() => choose(() => onAsk('leave'))} />
+              )}
+            </>
+          ) : (
+            <>
+              <Row icon={<Icons.Person />} title={texts.contact.details} onClick={() => choose(() => toPerson(id))} />
+              <Row icon={<Icons.Trash />} title={<span class="danger-text">{texts.contact.deleteHistory}</span>} onClick={() => choose(() => onAsk('history'))} />
+            </>
+          )}
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+/** Long press with a finger (touch or pen): after 500 ms, without moving; the click that follows is swallowed. */
+function useLongPress(onLong: (e: Entry) => void) {
+  const state = useRef<{ timer?: ReturnType<typeof setTimeout>; x: number; y: number; fired: boolean }>({ x: 0, y: 0, fired: false })
+  const cancel = () => clearTimeout(state.current.timer)
+  return {
+    fired() {
+      const f = state.current.fired
+      state.current.fired = false
+      return f
+    },
+    handlers: (e: Entry) => ({
+      onPointerDown: (ev: PointerEvent) => {
+        if (ev.pointerType === 'mouse') return
+        cancel()
+        state.current = { x: ev.clientX, y: ev.clientY, fired: false }
+        state.current.timer = setTimeout(() => {
+          state.current.fired = true
+          onLong(e)
+        }, 500)
+      },
+      onPointerMove: (ev: PointerEvent) => {
+        if (Math.abs(ev.clientX - state.current.x) > 10 || Math.abs(ev.clientY - state.current.y) > 10) cancel()
+      },
+      onPointerUp: cancel,
+      onPointerCancel: cancel,
+    }),
+  }
 }
 
 /** Short form of the attachments for the overview, like `previewText` of the app („📷 Foto“, „🎤 Sprachnachricht“). */
