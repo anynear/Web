@@ -787,4 +787,6 @@ tbody tr:last-child .abo-col.selected { box-shadow: inset 2px -2px 0 var(--signa
   .radio-badge { grid-column: 3; justify-self: start; }
 }
 .radio-choice.unfit { cursor: default; opacity: 0.55; }
+/* How the radio is used (Unterwegs / Stationär im WLAN): no picture, no badge. */
+.radio-choice.radio-mode { grid-template-columns: auto 1fr; }
 .radio-choice.unfit:hover { background: none; }
