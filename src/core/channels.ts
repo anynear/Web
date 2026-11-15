@@ -356,7 +356,8 @@ function setRegion(value: AlertRegion | null) {
   else local.set('alerts.region', null)
 }
 
-function currentPosition(): Promise<GeolocationPosition> {
+/** Approximate position of the browser (also for the radio area, ADR 0054 §1b); asks only if not yet decided. */
+export function currentPosition(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error('geolocation'))
     navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, maximumAge: 10 * 60_000, timeout: 20_000 })

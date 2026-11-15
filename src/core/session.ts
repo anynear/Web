@@ -1629,3 +1629,34 @@ export async function radioSoftware() {
     return null
   }
 }
+
+/**
+ * Where a radio on Wi-Fi uploads as a gateway (ADR 0054 §5b), from the signed radio list, also without pairing;
+ * `null` without core or when the list names none.
+ */
+export async function radioGateway() {
+  try {
+    return (await core?.radioGateway()) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Radio areas of the signed radio list in its order (ADR 0054 §1b); empty without core or list. */
+export async function radioAreas(): Promise<string[]> {
+  try {
+    return Array.from((await core?.radioAreas()) ?? [])
+  } catch {
+    return []
+  }
+}
+
+/** The area for a radio at the approximate position, with 2 km at borders; the position stays in the browser. */
+export function radioAreaAt(lat: number, lon: number, current: string | null): string | null {
+  return core?.radioAreaAt(lat, lon, current) ?? null
+}
+
+/** Settings of the area named [name] for the setup over the cable; `null` without such an area. */
+export function radioArea(name: string) {
+  return core?.radioArea(name) ?? null
+}
