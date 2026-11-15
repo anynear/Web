@@ -1,0 +1,6 @@
+# deploybase has no SPA fallback: these paths the web app reads itself are served with index.html (status 200), so a
+# direct call opens the app. /radio and /funkgeraet open the radio setup (src/core/radioSetup.ts, RADIO_PATHS), /a#…
+# is a channel link (src/core/alerts.ts, channelLinkFromUrl). Every other unknown path stays a 404.
+/radio /index.html 200
+/funkgeraet /index.html 200
+/a /index.html 200
