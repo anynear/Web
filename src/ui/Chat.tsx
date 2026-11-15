@@ -41,6 +41,9 @@ import {
   people,
   inviteLink,
   isSupportCircle,
+  loadingCircles,
+  loadingMailbox,
+  stillLoading,
   personName,
   previewLink,
   react,
@@ -174,8 +177,12 @@ export function Chat({ conv }: { conv: ConvKey }) {
               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
             }}
           >
-            {circle?.historyPending && <p class="hint">{texts.circle.historyLoading}</p>}
+            {/* Messages still coming: new in the circle, new device, back from the emergency card (ADR 0014, 0107 §8). */}
+            {(kind === 'circle'
+              ? !!circle && !circle.removed && (circle.historyPending || loadingCircles.value.includes(circle.id))
+              : loadingMailbox.value) && <p class="hint">{texts.circle.historyLoading}</p>}
             {list.value.length === 0 &&
+              !stillLoading(conv) &&
               (circle && !circle.removed && circle.members.length <= 1 ? (
                 <InviteFirst circleId={circle.id} />
               ) : (

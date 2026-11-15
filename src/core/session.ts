@@ -12,6 +12,8 @@ import {
   MemberState,
   AnmpCoreWeb,
   WebBlobResult,
+  WebHistoryAttachment,
+  WebHistoryItem,
   type AnmpAttachment,
   type AnmpLink,
   type PreparedAttachment,
@@ -59,7 +61,7 @@ import {
   listedConversations,
   markDeleted,
   newMid,
-  parseHistory,
+  ownHistoryOf,
   parseKey,
   pendingDelete,
   repliedTo,
@@ -67,6 +69,7 @@ import {
   summarize,
 } from './messages'
 import { browserDeviceName } from './device'
+import { READ_UNTIL_SETTING, decodeMarks, hasNewer, mergeMarks, readOnArrival, type ReadMarks } from './readUntil'
 import {
   SUPPORT_CIRCLE_PREFIX,
   SUPPORT_CONTACT_LINK,
@@ -174,6 +177,95 @@ export const summaries = computed(() => summarize(messages.value))
 let core: AnmpCoreWeb | null = null
 
 /** Receivers for data from own devices (topic, content, device), e.g. the answer to „Am Handy bestätigen“. */
+/** The own mailbox was not read through once yet on this device: direct chats still load (ADR 0107 §8). */
+export const loadingMailbox = signal(false)
+
+/** Circles whose space was not read through once yet on this device (ADR 0107 §8). */
+export const loadingCircles = signal<string[]>([])
+
+function refreshLoading() {
+  if (!core) return
+  loadingMailbox.value = core.loadingMailbox()
+  loadingCircles.value = [...core.loadingCircles()]
+}
+
+/** Whether the messages of [conv] are still coming on this device (ADR 0107 §8). */
+export function stillLoading(conv: ConvKey): boolean {
+  const { kind, id } = parseKey(conv)
+  return kind === 'circle' ? loadingCircles.value.includes(id) : loadingMailbox.value
+}
+
+// --- Read up to a point per conversation on all own devices (setting `read_until`, ADR 0107 §8) ---------------
+
+let readMarks: ReadMarks = decodeMarks(local.get('read.until'))
+let readMarksTimer: ReturnType<typeof setTimeout> | null = null
+
+function setReadMarks(next: ReadMarks) {
+  readMarks = next
+  local.set('read.until', JSON.stringify(next))
+}
+
+/** Collected briefly, so reading in an open chat does not write the profile space for every message. */
+function writeReadMarks() {
+  if (readMarksTimer) clearTimeout(readMarksTimer)
+  readMarksTimer = setTimeout(() => {
+    readMarksTimer = null
+    void core?.setSetting(READ_UNTIL_SETTING, JSON.stringify(readMarks)).catch(() => {})
+  }, 3000)
+}
+
+/** [conv] has been read up to its newest message ([sentAt]: one that is only just being stored). */
+function markReadUntil(conv: ConvKey, sentAt = 0) {
+  let newest = sentAt
+  for (const m of messages.value) if (m.conv === conv && !m.system && m.ts > newest) newest = m.ts
+  if (newest <= (readMarks[conv] ?? 0)) return
+  setReadMarks({ ...readMarks, [conv]: newest })
+  writeReadMarks()
+}
+
+/** State from the person's settings: per conversation the later time wins; what was read there is read here. */
+function takeReadMarks(text: string | null | undefined) {
+  const remote = decodeMarks(text)
+  const merged = mergeMarks(readMarks, remote)
+  setReadMarks(merged)
+  if (hasNewer(merged, remote)) writeReadMarks()
+  for (const [conv, at] of Object.entries(remote)) {
+    const read = messages.value.filter((m) => m.conv === conv && m.unread && m.ts <= at)
+    if (!read.length) continue
+    void save(read.map((m) => ({ ...m, unread: false })))
+    void closeNotifications(conv)
+  }
+}
+
+/** When this device began to load the messages after the emergency card or being added; noted the first time. */
+function loadingSince(): number {
+  const known = Number(local.get('history.loadingSince'))
+  if (known > 0) return known
+  const now = Date.now()
+  local.set('history.loadingSince', String(now))
+  return now
+}
+
+/**
+ * Hands the page's own direct history to the core once (ADR 0107 §6), again later until it got through. A new device
+ * reads its mailbox itself; there is no hand-over between devices any more.
+ */
+async function keepOwnHistory(c: AnmpCoreWeb) {
+  let pause = 30_000
+  for (;;) {
+    const items = ownHistoryOf(messages.value).map(
+      (h) =>
+        new WebHistoryItem(
+          h.peer, h.mid, h.ts, h.text, h.author, h.replyTo, h.replyFrom,
+          h.attachments.map((a) => new WebHistoryAttachment(a.id, a.key, a.type, a.name, a.size, a.width, a.height, a.duration, a.hash ?? null)),
+        ),
+    )
+    if (await c.keepOwnHistory(items).catch(() => false)) return
+    await new Promise((r) => setTimeout(r, pause))
+    pause = Math.min(pause * 2, 30 * 60_000)
+  }
+}
+
 export const ownDataListeners = new Set<(topic: string, data: Uint8Array, fromDevice: string) => void>()
 
 /** The running core, for sections outside this file (passwords). */
@@ -268,7 +360,11 @@ export async function boot() {
     }
   })
   c.onState(() => refresh())
+  c.onLoading(() => refreshLoading())
   const deviceId = await c.start()
+  refreshLoading()
+  void c.setting(READ_UNTIL_SETTING).then(takeReadMarks).catch(() => {})
+  void keepOwnHistory(c)
   const id = c.identity()
   me.value = { deviceId, personId: id?.personId ?? deviceId }
   ownName.value = local.get('name') ?? ''
@@ -511,16 +607,15 @@ function onEvent(e: CoreEvent) {
   }
   if (e instanceof CoreEvent.OwnData) {
     for (const l of ownDataListeners) l(e.topic, bytesOf(e.data), e.fromDevice)
-    if (e.topic !== 'history') return
-    const json = new TextDecoder().decode(new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength))
-    const known = new Set(messages.value.map((m) => m.id))
-    return save(withParkedReceipts(withPendingDeletes(parseHistory(json, me.value?.personId ?? '').filter((m) => !known.has(m.id)))))
+    return
   }
   if (e instanceof CoreEvent.ProfileChanged) {
     if (e.imageChanged) void keepOwnImage(e.image ? bytesOf(e.image) : null)
     const settings = new Map<string, Uint8Array>()
     for (const [k, v] of e.settings.asJsReadonlyMapView()) settings.set(k, bytesOf(v))
     onSettings(settings)
+    const marks = settings.get(READ_UNTIL_SETTING)
+    if (marks) takeReadMarks(new TextDecoder().decode(marks))
     if (e.name) {
       ownName.value = e.name
       local.set('name', e.name)
@@ -569,6 +664,9 @@ function onMessage(e: CoreEvent.Message) {
   if (messages.value.some((m) => m.id === id)) return
   const isOpen = openConv.value === conv && foreground.value
   const link = e.link ? linkOf(e.link) : undefined
+  // Back after the emergency card: what was read on the old device comes back read (ADR 0107 §8).
+  const ts = Number(e.timestampMillis)
+  const restoredRead = !own && !e.history && stillLoading(conv) && readOnArrival(ts, readMarks[conv], loadingSince())
   const fresh: Msg = {
     id,
     conv,
@@ -578,10 +676,10 @@ function onMessage(e: CoreEvent.Message) {
     fromPerson: e.fromPerson,
     fromName: e.fromName,
     text: e.text,
-    ts: Number(e.timestampMillis),
+    ts,
     status: own ? 'sent' : undefined,
     recipients: own ? recipientsOf(conv) : undefined,
-    unread: !own && !e.history && !isOpen,
+    unread: !own && !e.history && !isOpen && !restoredRead,
     attachments: e.attachments.asJsReadonlyArrayView().map(attOf),
     space: e.space || undefined,
     history: e.history || undefined,
@@ -591,9 +689,11 @@ function onMessage(e: CoreEvent.Message) {
   // Already deleted (the deletion came first): only the line, without notification.
   const [msg] = withParkedReceipts(withPendingDeletes([fresh]))
   void save([msg])
-  if (!own && !e.history && e.mid && !msg.deleted) {
-    if (isOpen) core?.confirmRead(e.fromDevice, e.mid, e.conversation)
-    else notify(msg)
+  if (!own && !e.history && e.mid && !msg.deleted && !restoredRead) {
+    if (isOpen) {
+      core?.confirmRead(e.fromDevice, e.mid, e.conversation)
+      markReadUntil(conv, ts)
+    } else notify(msg)
   }
 }
 
@@ -729,6 +829,8 @@ export function open(conv: ConvKey | null) {
 export function markOpenRead() {
   const conv = openConv.value
   if (!conv || !foreground.value || !core) return
+  // For the own other devices and a device after the emergency card: read up to the newest message.
+  markReadUntil(conv)
   const unread = messages.value.filter((m) => m.conv === conv && m.unread)
   if (!unread.length) return
   const { kind, id } = parseKey(conv)

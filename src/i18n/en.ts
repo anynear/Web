@@ -27,7 +27,7 @@ export const en: Texts = {
     lead: 'Connect this browser to anynear on your phone. Then you will see your circles and contacts here.',
     steps: [
       'Scan this code with your phone’s camera.',
-      'anynear shows a number. If it is the same as here, tap “Yes, the same” and confirm with your screen lock.',
+      'anynear shows a number. If it matches the number here, tap “Yes, they match” and confirm with your screen lock.',
     ],
     fallback: 'anynear does not open? In the app, tap “More” → “My devices” → “Add a device” and scan the code there.',
     waiting: 'Waiting for your phone …',
@@ -41,7 +41,7 @@ export const en: Texts = {
     done: 'Connected. anynear is restarting …',
     failed: 'The code could not be created right now. Check the internet connection.',
     privacy: 'Your keys stay in this browser. Only use anynear here on your own computer.',
-    usageStats: 'anynear sends a few numbers once a day, without names or content. You can switch this off in the settings.',
+    usageStats: 'anynear sends a few numbers once a day to an anynear server, without names or content. The server only adds them up. You can switch this off in the settings.',
   },
   update: {
     title: 'Please update anynear.',
@@ -69,6 +69,8 @@ export const en: Texts = {
     close: 'Close',
   },
   list: {
+    messagesLoading: 'Loading your messages …',
+    loading: 'Loading …',
     empty: 'No messages yet',
     emptyText: 'Start a circle or join one with an invitation link.',
     circles: 'Circles',
@@ -196,7 +198,7 @@ export const en: Texts = {
     already: 'You are already in this circle.',
     foreign: 'This link belongs to a different network.',
     invalid: 'This link doesn’t work. Check that it is complete.',
-    historyLoading: 'The earlier messages are on their way.',
+    historyLoading: 'Loading earlier messages …',
     youAre: 'you',
     ownDevicesInCircle: (n: number) => `On ${n} devices`,
     thisDevice: 'this device',
@@ -229,12 +231,12 @@ export const en: Texts = {
     title: 'Settings',
     privacy: 'Privacy',
     usageStats: 'Share usage statistics',
-    usageStatsOn: 'A few numbers once a day, without names or content.',
+    usageStatsOn: 'A few numbers once a day to an anynear server, without names or content. The server only adds them up.',
     usageStatsOff: 'Off. Nothing is sent.',
     usageStatsTestMode: 'Test mode: this browser sends nothing.',
     usageStatsSent: 'What was sent last',
     usageStatsNone: 'Nothing sent yet.',
-    usageStatsOffConfirm: 'anynear sends only a few rough numbers once a day: for example the app version, that this is the browser, and how many devices and circles you have. Names, content, locations and IP addresses are not stored. The numbers help us keep improving anynear.\n\nSwitch off anyway?',
+    usageStatsOffConfirm: 'anynear sends only a few rough numbers once a day to an anynear server: for example the app version, that this is the browser, and how many devices and circles you have. Names, content and locations are not sent. Your IP address is not stored. The report is discarded right after counting. The numbers help us keep improving anynear.\n\nSwitch off anyway?',
     usageStatsReport: (r: { devices: number; circles: number; channels: number; nina: boolean; version: string }) =>
       [
         r.devices === 1 ? '1 device' : `${r.devices} devices`,
@@ -306,7 +308,7 @@ export const en: Texts = {
     crashScreenTitle: 'Something went wrong',
     crashScreenText: 'anynear needs to reload. Afterwards you can send us a report.',
     crashScreenReload: 'Reload',
-    replySoon: "Thanks for your message. We'll get back to you soon, right here in this chat.",
+    replySoon: 'Thanks for your message. A person from our team will read it and reply here in this chat. This may take a while.',
     directBlocked: 'Please write to us using the form. That way every question gets its own chat.',
     openForm: 'Open the form',
     reportTitle: 'Report a problem',
@@ -830,7 +832,7 @@ export const en: Texts = {
     install: 'Install Meshtastic',
     downloading: 'Loading the software …',
     installing: 'Installing Meshtastic …',
-    keepPlugged: "Keep the cable plugged in until it's done. This takes about a minute.",
+    keepPlugged: "Don't unplug the cable until it's done. This takes about a minute.",
     installFailed: "Installing didn't work. Plug the radio in again and try once more. Nothing can break.",
     downloadFailed: "The software couldn't be loaded right now. Check the internet connection and try again. Nothing has changed on the radio.",
     driveSteps: [
