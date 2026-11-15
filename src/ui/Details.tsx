@@ -127,25 +127,7 @@ function CircleDetails({ id }: { id: string }) {
           onClose={() => setAsk(null)}
         />
       )}
-      {ask === 'leave' && (
-        <Confirm
-          title={circle.removed ? texts.circle.removeFromListTitle : texts.circle.leaveTitle(circle.name)}
-          text={
-            circle.removed
-              ? texts.circle.removeFromListText
-              : aloneIn(id)
-                ? `${texts.circle.leaveConfirm} ${texts.circle.leaveLastNote}`
-                : texts.circle.leaveConfirm
-          }
-          note={circle.removed ? undefined : texts.circle.leaveContactsNote}
-          confirm={circle.removed ? texts.circle.removeFromList : texts.circle.leave}
-          onConfirm={async () => {
-            await leaveCircle(id)
-            pane.value = 'chat'
-          }}
-          onClose={() => setAsk(null)}
-        />
-      )}
+      {ask === 'leave' && <LeaveCircleConfirm circle={circle} onClose={() => setAsk(null)} onLeft={() => (pane.value = 'chat')} />}
       {ask && typeof ask === 'object' && (
         <Confirm
           title={texts.circle.removeTitle(personName(ask.id, ask.name))}
@@ -244,12 +226,48 @@ function MemberRow({ p, own, ownDevices, canRemove, onRemove }: { p: Person; own
   )
 }
 
-function toPerson(id: string) {
+/** Leave a circle (or take it off the list once removed): from the circle page and from the overview (long press). */
+export function LeaveCircleConfirm({ circle, onClose, onLeft }: { circle: CircleView; onClose: () => void; onLeft?: () => void }) {
+  return (
+    <Confirm
+      title={circle.removed ? texts.circle.removeFromListTitle : texts.circle.leaveTitle(circle.name)}
+      text={
+        circle.removed
+          ? texts.circle.removeFromListText
+          : aloneIn(circle.id)
+            ? `${texts.circle.leaveConfirm} ${texts.circle.leaveLastNote}`
+            : texts.circle.leaveConfirm
+      }
+      note={circle.removed ? undefined : texts.circle.leaveContactsNote}
+      confirm={circle.removed ? texts.circle.removeFromList : texts.circle.leave}
+      onConfirm={async () => {
+        await leaveCircle(circle.id)
+        onLeft?.()
+      }}
+      onClose={onClose}
+    />
+  )
+}
+
+/** Delete the conversation with a person in this browser: from the contact page and from the overview (long press). */
+export function DeleteHistoryConfirm({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  return (
+    <Confirm
+      title={texts.contact.deleteHistoryTitle(name)}
+      text={texts.contact.deleteHistoryText(name)}
+      confirm={texts.contact.delete}
+      onConfirm={() => deleteHistory(directKey(id))}
+      onClose={onClose}
+    />
+  )
+}
+
+export function toPerson(id: string) {
   pane.value = 'details'
   open(directKey(id))
 }
 
-function toCircle(id: string) {
+export function toCircle(id: string) {
   pane.value = 'details'
   open(circleKey(id))
 }
@@ -318,15 +336,7 @@ function ContactDetails({ id }: { id: string }) {
           </div>
         </Dialog>
       )}
-      {ask === 'history' && (
-        <Confirm
-          title={texts.contact.deleteHistoryTitle(name)}
-          text={texts.contact.deleteHistoryText(name)}
-          confirm={texts.contact.delete}
-          onConfirm={() => deleteHistory(directKey(id))}
-          onClose={() => setAsk(null)}
-        />
-      )}
+      {ask === 'history' && <DeleteHistoryConfirm id={id} name={name} onClose={() => setAsk(null)} />}
       {ask === 'remove' && (
         <Confirm
           title={texts.profile.removeContactQuestion(name)}
