@@ -129,6 +129,7 @@ button { font: inherit; color: inherit; }
 
 .link-btn { border: 0; background: none; padding: 0; color: var(--link); text-decoration: underline; text-decoration-color: var(--signalorange); text-underline-offset: 3px; cursor: pointer; }
 .link-btn.danger { color: var(--warnrot); text-decoration-color: currentColor; }
+.danger-text { color: var(--warnrot); }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
@@ -232,6 +233,8 @@ button { font: inherit; color: inherit; }
 .conv {
   width: 100%; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: 12px;
   background: transparent; text-align: left; cursor: pointer;
+  /* Long press opens the row actions, not the selection or callout of the browser. */
+  -webkit-touch-callout: none; user-select: none;
 }
 .conv:hover { background: var(--active); }
 .conv.active { background: var(--selected); box-shadow: inset 3px 0 0 var(--signalorange); }
