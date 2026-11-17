@@ -2,8 +2,9 @@
 import { useSignal } from '@preact/signals'
 import { texts } from '../i18n'
 import { circleKey } from '../core/messages'
+import { circleToJoin } from '../core/invites'
 import { useEffect, useState } from 'preact/hooks'
-import { addContact, createCircle, joinCircle, open, ownContactLink } from '../core/session'
+import { addContact, createCircle, joinCircle, open, ownContactLink, previewLink } from '../core/session'
 import { Button, CopyLink, Dialog, Qr, Spinner } from './components'
 import { dialog, dialogLink, pane } from './nav'
 
@@ -82,13 +83,33 @@ const CONTACT_TEXT: Record<string, string> = {
   invalid: texts.contact.invalid,
 }
 
+/** Circle of the invitation in [link], as long as one is not in it yet; `null` otherwise (broken, other kind, member). */
+function useCircleInvite(link: string, active: boolean): { name: string; inviter: string } | null {
+  const [invite, setInvite] = useState<{ name: string; inviter: string } | null>(null)
+  useEffect(() => {
+    setInvite(null)
+    if (!active || !link.trim()) return
+    let live = true
+    previewLink(link.trim()).then(
+      (p) => live && setInvite(circleToJoin(p)),
+      () => undefined,
+    )
+    return () => {
+      live = false
+    }
+  }, [link, active])
+  return invite
+}
+
 function LinkDialog({ kind, close }: { kind: 'join' | 'contact'; close: () => void }) {
   const link = useSignal(dialogLink.value)
   const busy = useSignal(false)
   const result = useSignal<{ ok: boolean; text: string } | null>(null)
   const join = kind === 'join'
+  // Like the app: a readable invitation first asks „Dem Kreis … beitreten?“ with who invites; joined only on „Beitreten“.
+  const invite = useCircleInvite(link.value, join)
   return (
-    <Dialog title={join ? texts.list.joinCircle : texts.list.addContact} onClose={close}>
+    <Dialog title={invite ? texts.circle.joinTitle(invite.name) : join ? texts.list.joinCircle : texts.list.addContact} onClose={close}>
       <form
         class="dialog-body"
         onSubmit={async (e) => {
@@ -106,25 +127,36 @@ function LinkDialog({ kind, close }: { kind: 'join' | 'contact'; close: () => vo
           }
         }}
       >
-        <label class="field">
-          <span>{join ? texts.circle.joinLabel : texts.contact.addLabel}</span>
-          <input
-            class="input mono"
-            autoFocus
-            placeholder={join ? texts.circle.joinPlaceholder : texts.contact.addPlaceholder}
-            value={link.value}
-            onInput={(e) => {
-              link.value = e.currentTarget.value
-              result.value = null
-            }}
-          />
-        </label>
+        {invite ? (
+          <>
+            {invite.inviter && (
+              <p>
+                <strong>{texts.circle.invitedBy(invite.inviter)}</strong>
+              </p>
+            )}
+            <p>{texts.circle.joinText}</p>
+          </>
+        ) : (
+          <label class="field">
+            <span>{join ? texts.circle.joinLabel : texts.contact.addLabel}</span>
+            <input
+              class="input mono"
+              autoFocus
+              placeholder={join ? texts.circle.joinPlaceholder : texts.contact.addPlaceholder}
+              value={link.value}
+              onInput={(e) => {
+                link.value = e.currentTarget.value
+                result.value = null
+              }}
+            />
+          </label>
+        )}
         {result.value && <p class={result.value.ok ? 'ok' : 'error'}>{result.value.text}</p>}
         <div class="dialog-actions">
           <Button kind="quiet" onClick={close}>
-            {texts.common.cancel}
+            {invite ? texts.circle.dontJoin : texts.common.cancel}
           </Button>
-          <Button kind="main" type="submit" disabled={!link.value.trim() || busy.value}>
+          <Button kind="main" type="submit" disabled={!link.value.trim() || busy.value || !!result.value?.ok}>
             {join ? texts.circle.join : texts.contact.add}
           </Button>
         </div>

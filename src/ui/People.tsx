@@ -7,7 +7,8 @@ import { circles, me, open, openConv, people, supportPeer, type CircleView, type
 import { Avatar } from './Avatar'
 import { Button } from './components'
 import * as Icons from './icons'
-import { chatSearch, dialog, newMessage, pane } from './nav'
+import { chatSearch, dialog, forwarding, newMessage, pane } from './nav'
+import { forwardInto, forwardPreview } from './Chat'
 
 /** All known people except oneself, by name. */
 const contacts = computed<Person[]>(() => {
@@ -39,20 +40,42 @@ export function NewMessageNav() {
   const query = useSignal('')
   const q = query.value
   const shownCircles = circles.value.filter((c) => !c.removed && matches(q, c.name))
-  const shownPeople = contacts.value.filter((p) => matches(q, p.name, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)))
+  const shownPeople = contacts.value.filter((p) => matches(q, p.name, p.profileName, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)))
+  // „Weiterleiten“ uses the same choice (as the app): the message goes into the draft of the chosen conversation.
+  const forward = forwarding.value
+  const problem = useSignal('')
   const pick = (key: ConvKey) => {
+    if (forward) {
+      void forwardInto(key, forward).then((p) => {
+        if (p) {
+          problem.value = p
+          return
+        }
+        forwarding.value = null
+        pane.value = 'chat'
+        chatSearch.value = false
+        open(key)
+      })
+      return
+    }
     newMessage.value = false
     pane.value = 'chat'
     chatSearch.value = false
     open(key)
   }
+  const back = () => {
+    if (forward) forwarding.value = null
+    else newMessage.value = false
+  }
   return (
     <div class="people-nav">
       <div class="people-own">
-        <button type="button" class="list-action" onClick={() => (newMessage.value = false)}>
+        <button type="button" class="list-action" onClick={back}>
           <Icons.Back size={18} /> {texts.nav.back}
         </button>
-        <h2 class="section-title nav-title">{texts.list.whoToMessage}</h2>
+        <h2 class="section-title nav-title">{forward ? texts.chat.forwardQuestion : texts.list.whoToMessage}</h2>
+        {forward && <p class="muted small nav-note forward-preview">{forwardPreview(forward)}</p>}
+        {problem.value && <p class="small nav-note" role="alert">{problem.value}</p>}
       </div>
       <div class="list-tools">
         <input class="input search" type="search" placeholder={texts.list.searchName} value={q} onInput={(e) => (query.value = e.currentTarget.value)} />
@@ -90,14 +113,14 @@ export function NewMessageNav() {
           !q && <p class="muted small nav-note">{texts.list.noContactsYet}</p>
         )}
       </div>
-      <div class="people-foot people-own">
+      {!forward && <div class="people-foot people-own">
         <Button kind="secondary" class="people-wide" onClick={() => { newMessage.value = false; dialog.value = 'addContact' }}>
           <Icons.Plus size={18} /> {texts.list.addContact}
         </Button>
         <Button kind="secondary" class="people-wide" onClick={() => { newMessage.value = false; dialog.value = 'startCircle' }}>
           <Icons.Plus size={18} /> {texts.list.startCircle}
         </Button>
-      </div>
+      </div>}
     </div>
   )
 }

@@ -20,6 +20,9 @@ import {
   type StoredFile,
   type WebHost,
   type LinkPreview,
+  type ContactRequest,
+  type SentRequest,
+  Intro,
 } from 'anmp-core'
 import { texts } from '../i18n'
 import { decideUpdate, markReload, readMarkers, reloadToNewVersion, updateState, type UpdateBanner, type WebUpdateState } from './appUpdate'
@@ -67,9 +70,20 @@ import {
   repliedTo,
   replyOf,
   summarize,
+  type IntroCard,
 } from './messages'
 import { browserDeviceName } from './device'
+import { requestOriginText, withoutAsking } from './requests'
 import { READ_UNTIL_SETTING, decodeMarks, hasNewer, mergeMarks, readOnArrival, type ReadMarks } from './readUntil'
+import {
+  CONTACT_NAMES_SETTING,
+  activeContactNames,
+  contactNamesDiffer,
+  decodeContactNames,
+  mergeContactNames,
+  withContactName,
+  type ContactNameEntries,
+} from './contactNames'
 import {
   SUPPORT_CIRCLE_PREFIX,
   SUPPORT_CONTACT_LINK,
@@ -96,7 +110,10 @@ export type Phase = 'loading' | 'unsupported' | 'pairing' | 'ready' | 'revoked'
 
 export interface Person {
   id: string
+  /** Shown name: the own name for the person if one gave them one ([setContactName]), otherwise [profileName]. */
   name: string
+  /** Name from the person's own profile; shown small below an own name. */
+  profileName: string
   devices: string[]
   image: ImageRef | null
   circles: string[]
@@ -291,11 +308,17 @@ export function isSupportCircle(circleId: string): boolean {
   return !!c && c.name.startsWith(SUPPORT_CIRCLE_PREFIX) && c.members.some((p) => p.id === support)
 }
 
+/** Persons asking to become a contact (ADR 0116), shown as cards in „Nachrichten“ until answered. */
+export const contactRequests = signal<ContactRequest[]>([])
+/** Our requests not yet answered: „Anfrage gesendet“. */
+export const sentRequests = signal<SentRequest[]>([])
+
 /** Conversations in the overview „Nachrichten“, in no particular order (see [listedConversations]). */
 export const listedConvs = computed(() => {
   const contacts: string[] = []
   for (const p of people.value.values()) if (p.contact) contacts.push(p.id)
-  return listedConversations(circles.value, contacts, summaries.value.keys(), me.value?.personId, supportPeer.value)
+  // What a person still asking wrote waits for the answer (ADR 0116).
+  return withoutAsking(listedConversations(circles.value, contacts, summaries.value.keys(), me.value?.personId, supportPeer.value), contactRequests.value.map((r) => r.person))
 })
 
 /**
@@ -364,12 +387,14 @@ export async function boot() {
   const deviceId = await c.start()
   refreshLoading()
   void c.setting(READ_UNTIL_SETTING).then(takeReadMarks).catch(() => {})
+  void c.setting(CONTACT_NAMES_SETTING).then(takeContactNames).catch(() => {})
   void keepOwnHistory(c)
   const id = c.identity()
   me.value = { deviceId, personId: id?.personId ?? deviceId }
   ownName.value = local.get('name') ?? ''
   void loadSupportLink()
   refresh()
+  void refreshRequests()
   phase.value = isPaired() ? 'ready' : 'pairing'
   if (phase.value === 'ready') afterReady()
   takeChannelLink()
@@ -512,17 +537,17 @@ function refresh() {
   const ident = c.identity()
   // The core does not list the own person among the members; the own other devices it does.
   const ownId = ident?.personId ?? me.value?.personId ?? ''
-  const own: Person = { id: ownId, name: ownName.value, devices: c.ownDevices().map((d) => d.deviceId), image: null, circles: [], contact: false }
+  const own: Person = { id: ownId, name: ownName.value, profileName: ownName.value, devices: c.ownDevices().map((d) => d.deviceId), image: null, circles: [], contact: false }
   const personOf = (m: MemberState): Person => {
     const id = m.person
     if (id === ownId) return own
     let p = all.get(id)
     if (!p) {
-      p = { id, name: m.name, devices: [], image: m.image ?? null, circles: [], contact: false }
+      p = { id, name: m.name, profileName: m.name, devices: [], image: m.image ?? null, circles: [], contact: false }
       all.set(id, p)
     }
     if (!p.devices.includes(m.deviceId)) p.devices.push(m.deviceId)
-    if (!p.name && m.name) p.name = m.name
+    if (!p.profileName && m.name) p.name = p.profileName = m.name
     if (!p.image && m.image) p.image = m.image
     return p
   }
@@ -539,6 +564,9 @@ function refresh() {
   })
   for (const m of c.contacts()) personOf(m).contact = true
   own.contact = false
+  // Own names cover the names from the profiles everywhere (like Person.merge in the app).
+  const ownNames = activeContactNames(contactNameEntries.value)
+  for (const p of all.values()) p.name = ownNames[p.id] ?? p.profileName
   const status = c.relays()
   batch(() => {
     if (ident) me.value = { deviceId: ident.deviceId, personId: ident.personId }
@@ -559,7 +587,37 @@ function refresh() {
 export function personName(id: string | undefined, fallback?: string): string {
   if (!id) return fallback || texts.system.someone
   if (id === me.value?.personId) return ownName.value || texts.list.you
-  return people.value.get(id)?.name || fallback || texts.system.someone
+  return people.value.get(id)?.name || activeContactNames(contactNameEntries.value)[id] || fallback || texts.system.someone
+}
+
+// --- Own names for other people on all own devices (setting `contact_names`, like ContactNames in the app) -------
+
+/** Own names with their change time; also resets, so that they go to the other devices. */
+export const contactNameEntries = signal<ContactNameEntries>(decodeContactNames(local.get('contact.names')))
+
+function setContactNameEntries(next: ContactNameEntries) {
+  contactNameEntries.value = next
+  local.set('contact.names', JSON.stringify(next))
+  refresh()
+}
+
+/**
+ * Gives the person [id] an own name that only applies to oneself and covers the name from their profile everywhere;
+ * empty: back to the profile name („Zurücksetzen“). Goes to all own devices via the person's settings (ADR 0050).
+ */
+export function setContactName(id: string, name: string) {
+  const next = withContactName(contactNameEntries.value, id, name, Date.now())
+  if (next === contactNameEntries.value) return
+  setContactNameEntries(next)
+  void core?.setSetting(CONTACT_NAMES_SETTING, JSON.stringify(next)).catch(() => {})
+}
+
+/** State from the person's settings: per person the later change wins. */
+function takeContactNames(text: string | null | undefined) {
+  const remote = decodeContactNames(text)
+  const merged = mergeContactNames(contactNameEntries.value, remote)
+  if (contactNamesDiffer(merged, contactNameEntries.value)) setContactNameEntries(merged)
+  if (contactNamesDiffer(merged, remote)) void core?.setSetting(CONTACT_NAMES_SETTING, JSON.stringify(merged)).catch(() => {})
 }
 
 /** Person for a device, across all circles and contacts. */
@@ -616,6 +674,8 @@ function onEvent(e: CoreEvent) {
     onSettings(settings)
     const marks = settings.get(READ_UNTIL_SETTING)
     if (marks) takeReadMarks(new TextDecoder().decode(marks))
+    const names = settings.get(CONTACT_NAMES_SETTING)
+    if (names) takeContactNames(new TextDecoder().decode(names))
     if (e.name) {
       ownName.value = e.name
       local.set('name', e.name)
@@ -627,6 +687,12 @@ function onEvent(e: CoreEvent) {
   if (e instanceof CoreEvent.CircleRenamed) return systemLine(e.circleId, texts.system.renamed(deviceName(e.byDevice), e.name))
   if (e instanceof CoreEvent.MemberLeft) return systemLine(e.circleId, texts.system.left(e.name || texts.system.someone))
   if (e instanceof CoreEvent.KeyChanged) return onKeyChanged(e)
+  if (e instanceof CoreEvent.ContactRequestsChanged) return void refreshRequests()
+  if (e instanceof CoreEvent.IntroAccepted) {
+    return void save([
+      { id: `sys|${newMid()}`, conv: directKey(e.toPerson), outgoing: false, text: texts.people.introAcceptedLine(personName(e.toPerson), e.name), ts: Date.now(), attachments: [], system: true },
+    ])
+  }
   if ((e as unknown) === CoreEvent.Revoked) {
     local.set('revoked', '1')
     phase.value = 'revoked'
@@ -685,11 +751,14 @@ function onMessage(e: CoreEvent.Message) {
     history: e.history || undefined,
     ...(link ? { link } : {}),
     ...replyOf(e.replyTo, e.replyFrom),
+    ...(e.passedOn ? { passedOn: true } : {}),
+    ...(e.intro ? { intro: { id: e.intro.id, person: e.intro.person, name: e.intro.name, byPerson: e.intro.byPerson, until: Number(e.intro.until), card: e.intro.card } } : {}),
   }
   // Already deleted (the deletion came first): only the line, without notification.
   const [msg] = withParkedReceipts(withPendingDeletes([fresh]))
   void save([msg])
-  if (!own && !e.history && e.mid && !msg.deleted && !restoredRead) {
+  // A person still asking (ADR 0116): one notice for the request, none per message.
+  if (!own && !e.history && e.mid && !msg.deleted && !restoredRead && !e.fromRequest) {
     if (isOpen) {
       core?.confirmRead(e.fromDevice, e.mid, e.conversation)
       markReadUntil(conv, ts)
@@ -850,7 +919,7 @@ export function canWrite(conv: ConvKey): boolean {
  * Send a message, with up to five prepared files (ADR 0011). What the browser sends itself stays in
  * IndexedDB, so that it stays visible without the relays and a resend has the attachments again.
  */
-export async function send(conv: ConvKey, text: string, files: Prepared[] = [], retry?: Msg, replyTo?: Msg): Promise<boolean> {
+export async function send(conv: ConvKey, text: string, files: Prepared[] = [], retry?: Msg, replyTo?: Msg, passedOn = false): Promise<boolean> {
   const body = text.trim()
   if (!core || (!body && !files.length && !retry?.attachments.length)) return false
   const c = core
@@ -870,6 +939,8 @@ export async function send(conv: ConvKey, text: string, files: Prepared[] = [], 
         recipients: recipientsOf(conv),
         attachments: [],
         ...(replyTo && replyTo.conv === conv ? (replyRef(replyTo) ?? {}) : {}),
+        // Passes on a message one got („Weiterleiten“, ADR 0118).
+        ...(passedOn ? { passedOn: true } : {}),
       }
   // On resending, the content comes from the own storage.
   const sources: Prepared[] = retry
@@ -895,7 +966,7 @@ export async function send(conv: ConvKey, text: string, files: Prepared[] = [], 
     const to = msg.replyTo ?? null
     const from = msg.replyTo ? (msg.replyFrom ?? null) : null
     const sent =
-      kind === 'circle' ? await c.sendCircle(id, msg.text, mid, prepared, to, from) : await c.sendDirect(id, msg.text, mid, prepared, to, from)
+      kind === 'circle' ? await c.sendCircle(id, msg.text, mid, prepared, to, from, !!msg.passedOn) : await c.sendDirect(id, msg.text, mid, prepared, to, from, !!msg.passedOn)
     if (!sent) await save([{ ...msg, status: 'failed' }])
     return !!sent
   } catch {
@@ -1016,8 +1087,79 @@ export async function inviteToCircle(personId: string, circleId: string): Promis
   return send(directKey(personId), texts.share.invite(circle.name, link))
 }
 
-export function addContact(link: string): Promise<string> {
-  return core!.addContact(link.trim())
+export async function addContact(link: string): Promise<string> {
+  const r = await core!.addContact(link.trim())
+  void refreshRequests()
+  return r
+}
+
+// --- Contact requests and introductions (ADR 0116) ----------------------------------------------------
+
+export async function refreshRequests() {
+  if (!core) return
+  const before = new Set(contactRequests.value.map((r) => r.person))
+  const now = [...(await core.contactRequests())]
+  contactRequests.value = now
+  sentRequests.value = [...(await core.sentContactRequests())]
+  for (const r of now) {
+    if (before.has(r.person)) continue
+    void showNotification(texts.people.requestTitle(r.name), requestOrigin(r), `request|${r.person}`, {})
+  }
+}
+
+/** „Vorgestellt von Anna“ or „Über deinen Kontaktlink“. */
+export function requestOrigin(r: ContactRequest): string {
+  return requestOriginText(r.introducedByName)
+}
+
+export async function acceptRequest(person: string): Promise<boolean> {
+  const ok = await core!.acceptContactRequest(person)
+  await refreshRequests()
+  refresh()
+  return ok
+}
+
+/** Silent: the person learns nothing; what it wrote is deleted here. */
+export async function declineRequest(person: string) {
+  await core!.declineContactRequest(person)
+  await forget(directKey(person))
+  await refreshRequests()
+}
+
+/** Introduce the contact [personId] to the contact [toPerson]: a card in that chat; both are asked (ADR 0116). */
+export async function introduce(personId: string, toPerson: string): Promise<boolean> {
+  // The name the person gave itself, never an own name for it (ADR 0116 §2): the stand-in text goes to the other side.
+  const name = people.value.get(personId)?.profileName || personName(personId)
+  const text = texts.people.introStandIn(name)
+  // The picture goes along as in the app (ADR 0116 §2); without one the introduction goes anyway.
+  const image = await introImage(personId).catch(() => null)
+  const mid = await core!.introduce(personId, toPerson, text, image)
+  if (!mid) return false
+  void save([
+    {
+      id: mid, conv: directKey(toPerson), mid, outgoing: true, text, ts: Date.now(), status: 'sent', recipients: [toPerson], attachments: [],
+      intro: { id: '', person: personId, name, byPerson: me.value?.personId ?? '', until: Date.now() + 30 * 24 * 3600 * 1000, card: '' },
+    },
+  ])
+  return true
+}
+
+/** Picture of the contact [personId] as a prepared `jpg` attachment for an introduction; `null` without one. */
+async function introImage(personId: string): Promise<PreparedAttachment | null> {
+  const ref = people.value.get(personId)?.image
+  if (!ref || !core) return null
+  const r = await core.fetchImageResult(ref)
+  if (r.status !== WebBlobResult.Companion.FOUND || !r.bytes) return null
+  const shrunk = await shrinkImage(new Blob([r.bytes as BlobPart]), LIMITS.avatarEdge, LIMITS.avatarQuality)
+  if (!shrunk) return null
+  return core.prepareAttachment(shrunk.bytes as unknown as Int8Array, 'jpg', null, shrunk.width, shrunk.height)
+}
+
+/** We want the contact of [intro]; the introducer passes the request on. Resolves like [addContact], or `requested`. */
+export async function acceptIntro(intro: IntroCard): Promise<string> {
+  const r = await core!.acceptIntro(new Intro(intro.id, intro.person, intro.name, intro.byPerson, BigInt(intro.until), intro.card, null))
+  await refreshRequests()
+  return r
 }
 
 /** Support link: built in, replaced by the one from the website if that one fits (ADR 0084 §7). */

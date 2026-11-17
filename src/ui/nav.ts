@@ -1,5 +1,6 @@
 // What is visible on the right or on the phone and which dialog is open.
 import { signal } from '@preact/signals'
+import type { Msg } from '../core/messages'
 import { isRadioPath } from '../core/radioSetup'
 
 export type Section = 'messages' | 'circles' | 'files' | 'alerts'
@@ -10,6 +11,8 @@ export type DialogKind = 'startCircle' | 'joinCircle' | 'addContact' | 'createCh
 export const section = signal<Section>('messages')
 /** „Neue Nachricht“ open above „Nachrichten“: choosing whom to write to (contacts and circles). */
 export const newMessage = signal(false)
+/** „Weiterleiten“: this message waits for „An wen?“ (the same choice as „Neue Nachricht“), `null` = nothing. */
+export const forwarding = signal<Msg | null>(null)
 /** In the storage: `mine`, `passwords` or a circle ID; `null` = nothing chosen. */
 export const filesSel = signal<string | null>(null)
 /** Search across all storages (ADR 0070 §7); not empty: the hits are on the right. */

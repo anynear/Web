@@ -271,7 +271,11 @@ button { font: inherit; color: inherit; }
 .hint { align-self: center; padding: 8px 14px; border-radius: 10px; background: var(--orange-hell); color: var(--orange-text); font-size: 0.9rem; margin-bottom: 8px; }
 .empty-chat { align-self: center; margin: auto; color: var(--muted); }
 
-.bubble-row { display: flex; flex-direction: column; margin-top: 6px; }
+.bubble-row { position: relative; display: flex; flex-direction: column; margin-top: 6px; touch-action: pan-y; transition: transform 0.2s ease-out; }
+/* Pulling to answer: the message follows the finger without delay, the arrow waits on the left. */
+.bubble-row.swiping { transition: none; user-select: none; -webkit-user-select: none; }
+.swipe-reply { position: absolute; top: 50%; color: var(--muted); display: grid; place-items: center; pointer-events: none; }
+.swipe-reply.armed { color: var(--text); }
 .bubble-row.out { align-items: flex-end; }
 .bubble-row.in { align-items: flex-start; }
 .bubble {
@@ -282,6 +286,9 @@ button { font: inherit; color: inherit; }
 .in .bubble { border-bottom-left-radius: 4px; }
 .out .bubble a { color: var(--bernstein); }
 .bubble-name { font-weight: 600; font-size: 0.88rem; color: var(--text); margin-bottom: 2px; }
+/* „Weitergeleitet“ (ADR 0118): in the bubble in its text colour, quieter; above the input like the reply bar. */
+.passed-on { display: flex; align-items: center; gap: 4px; font-size: 0.8rem; font-style: italic; opacity: 0.75; margin-bottom: 2px; }
+.composer-wrap > .passed-on { margin: 8px clamp(12px, 4vw, 40px) 0; color: var(--muted); opacity: 1; }
 .bubble-text { font-size: 1.05rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble-meta { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; font-size: 0.75rem; opacity: 0.8; margin-top: 2px; }
 .status.read { color: var(--read); opacity: 1; }

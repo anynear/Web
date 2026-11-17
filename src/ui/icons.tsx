@@ -62,6 +62,8 @@ export const Smile = (p: Props) => (
   </Icon>
 )
 export const Reply = (p: Props) => <Icon {...p}><path d="M9 17l-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></Icon>
+/** Forward a message: [Reply] mirrored, as in the app. */
+export const ForwardMessage = (p: Props) => <Icon {...p}><path d="M15 17l5-5-5-5" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></Icon>
 export const Copy = (p: Props) => (
   <Icon {...p}>
     <rect x="9" y="9" width="12" height="12" rx="2" />

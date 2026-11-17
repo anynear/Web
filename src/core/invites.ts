@@ -62,3 +62,8 @@ export function withoutInviteLinks(text: string, links: InviteLink[] = findInvit
     .replace(/[:\s\-–]+$/, '')
   return SHARE_SENTENCES.some((r) => r.test(cleaned)) ? '' : cleaned
 }
+
+/** Circle invitation to confirm before joining („Dem Kreis … beitreten?“), as in the app; `null` if broken, another kind or already a member. */
+export function circleToJoin(p: { kind: string; name: string; joined: boolean; inviter?: string } | null): { name: string; inviter: string } | null {
+  return p && p.kind === 'circle' && !p.joined ? { name: p.name, inviter: (p.inviter ?? '').trim() } : null
+}

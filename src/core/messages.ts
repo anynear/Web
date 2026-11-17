@@ -65,6 +65,20 @@ export interface Msg {
    */
   replyTo?: string
   replyFrom?: string
+  /** The sender passed on a message it got („Weitergeleitet“, ADR 0118); no origin. */
+  passedOn?: boolean
+  /** Contact introduced in this message (ADR 0116); [text] is only the stand-in for older apps. */
+  intro?: IntroCard
+}
+
+/** Introduced contact as in the core (`Intro`): person ID, its own name, introducer, until (ms), signed card. */
+export interface IntroCard {
+  id: string
+  person: string
+  name: string
+  byPerson: string
+  until: number
+  card: string
 }
 
 /** Preview of a link as in ANMP field 34 (AnmpLink); the picture is an attachment in the space of the message. */
