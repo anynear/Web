@@ -12,7 +12,7 @@ import { Details } from './Details'
 import { Dialogs } from './Dialogs'
 import { Viewer } from './Viewer'
 import { FilesPage, FilesSearchPage } from './Files'
-import { alertSel, filesQuery, filesSel, pane, section, supportKind } from './nav'
+import { alertSel, filesQuery, filesSel, forwarding, pane, section, supportKind } from './nav'
 import { PasswordsPage } from './Passwords'
 import { Guide } from './Guide'
 import { Pairing } from './Pairing'
@@ -124,7 +124,7 @@ function Main() {
             ? pane.value
             : 'none'
   return (
-    <div class={`shell ${right === 'none' ? 'show-list' : 'show-main'}`}>
+    <div class={`shell ${right === 'none' || forwarding.value ? 'show-list' : 'show-main'}`}>
       <ConversationList />
       <main class="main">
         {right === 'settings' && <Settings />}

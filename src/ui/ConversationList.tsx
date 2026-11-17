@@ -5,7 +5,7 @@ import type { ImageRef } from 'anmp-core'
 import { texts } from '../i18n'
 import { parseKey, type ConvKey } from '../core/messages'
 import { unread as alertsUnread } from '../core/channels'
-import { circles, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, stillLoading, summaries } from '../core/session'
+import { acceptRequest, circles, contactRequests, declineRequest, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, requestOrigin, stillLoading, summaries } from '../core/session'
 import { Avatar } from './Avatar'
 import { formatListTime } from './format'
 import * as Icons from './icons'
@@ -13,9 +13,9 @@ import { AlertsNav } from './Alerts'
 import { FilesNav } from './Files'
 import { CirclesNav, NewMessageNav } from './People'
 import { MainHeader } from './MainMenu'
-import { chatSearch, newMessage, pane, section } from './nav'
+import { chatSearch, forwarding, newMessage, pane, section } from './nav'
 import { CrashCard } from './CrashReport'
-import { Dialog, Row } from './components'
+import { Button, Dialog, Row } from './components'
 import { DeleteHistoryConfirm, LeaveCircleConfirm, toCircle, toPerson } from './Details'
 
 interface Entry {
@@ -110,11 +110,12 @@ export function ConversationList() {
         <CirclesNav />
       ) : section.value === 'alerts' ? (
         <AlertsNav />
-      ) : newMessage.value ? (
+      ) : newMessage.value || forwarding.value ? (
         <NewMessageNav />
       ) : (
         <>
           <CrashCard />
+          <RequestCards />
           {/* New device or back from the emergency card: the messages are still coming (ADR 0107 §8). */}
           {(loadingMailbox.value || loadingCircles.value.length > 0) && <p class="hint">{texts.list.messagesLoading}</p>}
           <div class="list-tools">
@@ -251,4 +252,28 @@ function attachmentPreview(list: { type: string; name: string }[]): string {
   if (a.type === 'jpg') return `📷 ${texts.attachment.photo}`
   if (a.type === 'm4a') return `🎤 ${texts.attachment.voice}`
   return `📎 ${a.name || (a.type === 'pdf' ? texts.attachment.pdf : texts.attachment.file)}`
+}
+
+/** Persons asking to become a contact (ADR 0116), as in the app: agree or decline; what they wrote waits until then. */
+function RequestCards() {
+  return (
+    <>
+      {contactRequests.value.map((r) => (
+        <div key={r.person} class="nav-note crash-card">
+          <div class="card-pad">
+            <strong>{texts.people.requestTitle(r.name)}</strong>
+            <p class="muted small">{requestOrigin(r)}</p>
+            <div class="crash-actions">
+              <Button kind="secondary" onClick={() => void acceptRequest(r.person)}>
+                {texts.people.requestAgree}
+              </Button>
+              <Button kind="quiet" onClick={() => void declineRequest(r.person)}>
+                {texts.people.requestDecline}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
+  )
 }

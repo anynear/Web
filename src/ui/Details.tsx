@@ -12,6 +12,7 @@ import {
   deleteHistory,
   inviteLink,
   inviteToCircle,
+  introduce,
   isSupportCircle,
   leaveCircle,
   me,
@@ -23,11 +24,14 @@ import {
   renameCircle,
   resetInvites,
   setCirclePicture,
+  setContactName,
+  supportPeer,
   type CircleView,
   type Person,
 } from '../core/session'
 import { Avatar } from './Avatar'
 import { Button, Confirm, CopyLink, Dialog, Qr, Row, Section } from './components'
+import { MAX_CONTACT_NAME } from '../core/contactNames'
 import { circleSummary, originOf } from './People'
 import { StoreList } from './Files'
 import * as Icons from './icons'
@@ -213,8 +217,16 @@ function MemberRow({ p, own, ownDevices, canRemove, onRemove }: { p: Person; own
       <Row
         icon={<Avatar id={p.id} kind="person" size={36} image={p.image} />}
         title={own ? `${personName(p.id)} (${texts.circle.youAre})` : personName(p.id, p.name)}
-        // One's own further devices are no extra line, only a note (ADR 0042).
-        text={own && ownDevices > 1 ? texts.circle.ownDevicesInCircle(ownDevices) : undefined}
+        // One's own further devices are no extra line, only a note (ADR 0042). With an own name the profile name below.
+        text={
+          own
+            ? ownDevices > 1
+              ? texts.circle.ownDevicesInCircle(ownDevices)
+              : undefined
+            : p.profileName && p.profileName !== p.name
+              ? texts.contact.profileName(p.profileName)
+              : undefined
+        }
         onClick={own ? undefined : () => toPerson(p.id)}
       />
       {canRemove && (
@@ -278,18 +290,25 @@ function ContactDetails({ id }: { id: string }) {
   const shared = circles.value.filter((c) => !c.removed && c.members.some((m) => m.id === id))
   const invitable = circles.value.filter((c) => !c.removed && !c.members.some((m) => m.id === id))
   const writable = canWrite(directKey(id))
-  const [ask, setAsk] = useState<'invite' | 'history' | 'remove' | null>(null)
+  const [ask, setAsk] = useState<'invite' | 'history' | 'remove' | 'name' | 'share' | null>(null)
   const [invited, setInvited] = useState('')
+  // Own name only for people with anynear, not for support (ADR 0065).
+  const renamable = !!p && p.id !== supportPeer.value
+  // „Kontakt teilen“ (ADR 0116): only to own contacts; both are asked before they can write to each other.
+  const others = [...people.value.values()].filter((o) => o.contact && o.id !== id)
   return (
     <>
       <div class="hero">
         <Avatar id={id} kind="person" size={88} image={p?.image ?? null} />
         <h2>{name}</h2>
+        {p && p.profileName && p.profileName !== p.name && <p class="muted small">{texts.contact.profileName(p.profileName)}</p>}
         {p && <p class="muted">{originOf(p)}</p>}
       </div>
       <div class="action-tiles">
         <ActionTile icon={<Icons.Chat />} label={texts.contact.write} main onClick={() => toChat(directKey(id))} />
         <ActionTile icon={<Icons.Search />} label={texts.profile.searchInChat} onClick={() => toChat(directKey(id), true)} />
+        {renamable && <ActionTile icon={<Icons.Edit />} label={texts.contact.changeName} onClick={() => setAsk('name')} />}
+        {p?.contact && <ActionTile icon={<Icons.Share />} label={texts.people.shareContact} onClick={() => setAsk('share')} />}
       </div>
       {shared.length > 0 && (
         <Section title={texts.contact.inCircles}>
@@ -336,6 +355,28 @@ function ContactDetails({ id }: { id: string }) {
           </div>
         </Dialog>
       )}
+      {ask === 'name' && p && <ContactNameDialog p={p} onClose={() => setAsk(null)} />}
+      {ask === 'share' && (
+        <Dialog title={texts.people.shareContactWho(name)} onClose={() => setAsk(null)}>
+          <div class="dialog-body">
+            <p class="muted">{texts.people.shareContactHint(name)}</p>
+            {others.length === 0 && <p>{texts.people.noOtherContacts}</p>}
+            <div class="card">
+              {others.map((o) => (
+                <Row
+                  key={o.id}
+                  icon={<Avatar id={o.id} kind="person" size={36} image={o.image ?? null} />}
+                  title={personName(o.id, o.name)}
+                  onClick={async () => {
+                    setAsk(null)
+                    setInvited((await introduce(id, o.id)) ? texts.people.introSent(name, personName(o.id, o.name)) : texts.people.introFailed)
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </Dialog>
+      )}
       {ask === 'history' && <DeleteHistoryConfirm id={id} name={name} onClose={() => setAsk(null)} />}
       {ask === 'remove' && (
         <Confirm
@@ -350,5 +391,62 @@ function ContactDetails({ id }: { id: string }) {
         />
       )}
     </>
+  )
+}
+
+/**
+ * „Namen ändern“: an own name for [p] that only applies to oneself (on all own devices) and covers the name from their
+ * profile everywhere. „Zurücksetzen“ shows the profile name again. As in the app.
+ */
+function ContactNameDialog({ p, onClose }: { p: Person; onClose: () => void }) {
+  const name = useSignal(p.name)
+  const hasOwn = p.name !== p.profileName
+  return (
+    <Dialog title={texts.contact.changeName} onClose={onClose}>
+      <form
+        class="dialog-body"
+        onSubmit={(e) => {
+          e.preventDefault()
+          // Empty or the profile name again: no own name.
+          setContactName(p.id, name.value.trim() === p.profileName.trim() ? '' : name.value)
+          onClose()
+        }}
+      >
+        <label class="field">
+          <span>{texts.contact.nameLabel}</span>
+          <input
+            class="input"
+            maxLength={MAX_CONTACT_NAME}
+            value={name.value}
+            placeholder={p.profileName}
+            onInput={(e) => (name.value = e.currentTarget.value)}
+          />
+        </label>
+        <p class="muted small">{texts.contact.nameHint}</p>
+        {hasOwn && (
+          <>
+            <p class="muted small">{texts.contact.profileName(p.profileName)}</p>
+            <button
+              type="button"
+              class="link-btn"
+              onClick={() => {
+                setContactName(p.id, '')
+                onClose()
+              }}
+            >
+              {texts.contact.resetName}
+            </button>
+          </>
+        )}
+        <div class="dialog-actions">
+          <Button kind="quiet" onClick={onClose}>
+            {texts.common.cancel}
+          </Button>
+          <Button kind="main" type="submit">
+            {texts.settings.save}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }

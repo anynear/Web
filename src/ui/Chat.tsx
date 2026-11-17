@@ -6,11 +6,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { texts } from '../i18n'
 import { LIMITS, mimeOf, prepareFile, type Prepared } from '../core/media'
 import type { AboLimit } from '../core/abo'
-import { draftFiles, draftText, saveDraftFiles, saveDraftText } from '../core/drafts'
+import { addToDraft, draftFiles, draftPassedOn, draftText, incomingDrafts, saveDraftFiles, saveDraftPassedOn, saveDraftText, takeIncoming } from '../core/drafts'
 import { findInviteLinks, withoutInviteLinks, type InviteLink } from '../core/invites'
+import { introState, introStatus } from '../core/requests'
 import { channels, openRequest, pendingLink } from '../core/channels'
 import {
   type Att,
+  type IntroCard,
   type ConvKey,
   type Msg,
   SELF,
@@ -50,16 +52,18 @@ import {
   replyRef,
   send,
   supportPeer,
+  acceptIntro,
+  sentRequests,
 } from '../core/session'
 import type { LinkPreview } from 'anmp-core'
 import { Avatar } from './Avatar'
-import { Button, CopyLink, Dialog, Qr } from './components'
+import { Button, Confirm, CopyLink, Dialog, Qr } from './components'
 import { formatDay, formatListTime, formatSize, formatTime, isSameDay, splitLinks } from './format'
 import * as Icons from './icons'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
 import { FileActionDialog, type FileAction, type FileItem } from './FileActions'
-import { chatSearch, dialog, dialogLink, pane, section, supportKind } from './nav'
+import { chatSearch, dialog, dialogLink, forwarding, pane, section, supportKind } from './nav'
 
 /** For selection as in the app (Reaction.CHOICES). */
 const CHOICES = ['👍', '❤️', '😂', '😮', '😢', '🙏']
@@ -307,6 +311,67 @@ function DeletedLine({ m, highlighted, flash }: { m: Msg; highlighted: boolean; 
   )
 }
 
+/** From this distance on (px), letting go answers the message (same value as in the app, 56 dp). */
+const REPLY_TRIGGER = 56
+/** The message does not follow the finger further than this. */
+const REPLY_MAX = 80
+
+/**
+ * Pull a message to the right with the finger to answer it (ADR 0092), as in the app: the message follows the finger,
+ * the answer arrow appears on the left; beyond [REPLY_TRIGGER] a short vibration (where the browser can), letting go
+ * starts the answer, before that the message springs back. Touch only: with the mouse, dragging selects text. Up and
+ * down stays scrolling (`touch-action: pan-y`); a movement that starts more vertically is left alone.
+ */
+function useSwipeToReply(onReply?: () => void) {
+  const [pulled, setPulled] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const start = useRef<{ id: number; x: number; y: number; mode: 'pending' | 'drag' | 'off' } | null>(null)
+  const armed = pulled >= REPLY_TRIGGER
+  const end = () => {
+    const s = start.current
+    start.current = null
+    if (s?.mode !== 'drag') return
+    setDragging(false)
+    if (pulled >= REPLY_TRIGGER) onReply?.()
+    setPulled(0)
+  }
+  if (!onReply) return { pulled: 0, armed: false, dragging: false, handlers: {} }
+  return {
+    pulled,
+    armed,
+    dragging,
+    handlers: {
+      onPointerDown: (e: PointerEvent) => {
+        if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return
+        start.current = { id: e.pointerId, x: e.clientX, y: e.clientY, mode: 'pending' }
+      },
+      onPointerMove: (e: PointerEvent) => {
+        const s = start.current
+        if (!s || s.id !== e.pointerId || s.mode === 'off') return
+        const dx = e.clientX - s.x
+        const dy = e.clientY - s.y
+        if (s.mode === 'pending') {
+          if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) s.mode = 'off'
+          else if (dx > 10 && dx > Math.abs(dy)) {
+            s.mode = 'drag'
+            s.x += 10
+            setDragging(true)
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          }
+          return
+        }
+        const raw = Math.max(0, e.clientX - s.x)
+        // Beyond the trigger point it gets heavier, so that the end is felt.
+        const next = Math.min(REPLY_MAX, raw <= REPLY_TRIGGER ? raw : REPLY_TRIGGER + (raw - REPLY_TRIGGER) * 0.4)
+        if (next >= REPLY_TRIGGER && pulled < REPLY_TRIGGER) navigator.vibrate?.(10)
+        setPulled(next)
+      },
+      onPointerUp: end,
+      onPointerCancel: end,
+    },
+  }
+}
+
 function Bubble({
   m,
   inCircle,
@@ -345,12 +410,28 @@ function Bubble({
   }, [fileNotice])
   const reactions = reactionSummary(m)
   const invites = m.text ? findInviteLinks(m.text) : []
-  const text = invites.length ? withoutInviteLinks(m.text, invites) : m.text
+  // With an introduction (ADR 0116) the card says it all; the text is only the stand-in for older apps.
+  const text = m.intro ? '' : invites.length ? withoutInviteLinks(m.text, invites) : m.text
   const link = shownLink(m)
   // One does not react to own messages (as in the app); every message can be deleted.
   const canReact = !!m.mid && !m.outgoing
+  const swipe = useSwipeToReply(onReply)
   return (
-    <div id={`m-${m.id}`} class={`bubble-row ${m.outgoing ? 'out' : 'in'} ${highlighted ? 'highlight' : ''} ${flash ? 'flash' : ''}`}>
+    <div
+      id={`m-${m.id}`}
+      class={`bubble-row ${m.outgoing ? 'out' : 'in'} ${highlighted ? 'highlight' : ''} ${flash ? 'flash' : ''} ${swipe.dragging ? 'swiping' : ''}`}
+      style={swipe.pulled ? { transform: `translateX(${swipe.pulled}px)` } : undefined}
+      {...swipe.handlers}
+    >
+      {swipe.pulled > 0 && (
+        <span
+          class={`swipe-reply ${swipe.armed ? 'armed' : ''}`}
+          aria-hidden="true"
+          style={{ left: `${4 - swipe.pulled}px`, opacity: Math.min(1, swipe.pulled / REPLY_TRIGGER), transform: `translateY(-50%) scale(${0.6 + 0.4 * Math.min(1, swipe.pulled / REPLY_TRIGGER)})` }}
+        >
+          <Icons.Reply size={22} />
+        </span>
+      )}
       <div
         class="bubble"
         onContextMenu={(e) => {
@@ -361,6 +442,7 @@ function Bubble({
         }}
       >
         {showName && <div class="bubble-name">{personName(m.fromPerson, m.fromName)}</div>}
+        {m.passedOn && <PassedOnLabel />}
         {m.replyTo && <QuoteBox m={m} onOpen={onQuote} />}
         {m.attachments.map((a) => (
           <Attachment key={a.id} m={m} a={a} />
@@ -379,6 +461,7 @@ function Bubble({
           </div>
         )}
         {link && <LinkPreviewCard m={m} link={link} />}
+        {m.intro && <IntroCardView intro={m.intro} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />}
         {invites.map((l) => (
           <InviteCard key={l.start} link={l} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />
         ))}
@@ -425,6 +508,30 @@ function Bubble({
               >
                 <Icons.Reply size={18} />
                 <span>{texts.chat.reply}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              class="picker-action"
+              onClick={() => {
+                setPicking(false)
+                forwarding.value = m
+              }}
+            >
+              <Icons.ForwardMessage size={18} />
+              <span>{texts.chat.forward}</span>
+            </button>
+            {/* Into the system's share menu only via this explicit button (files are otherwise viewed in the page). */}
+            {canShare() && (
+              <button
+                type="button"
+                role="menuitem"
+                class="picker-action"
+                onClick={() => void shareMessage(m).then((problem) => problem && setFileNotice(problem))}
+              >
+                <Icons.Share size={18} />
+                <span>{texts.chat.share}</span>
               </button>
             )}
             {files.length > 0 && (
@@ -532,6 +639,16 @@ function QuoteBox({ m, onOpen }: { m: Msg; onOpen: () => void }) {
 }
 
 /** Above the input while answering: to whom, one line of the original, ✕ to cancel. */
+/** „Weitergeleitet“ with an arrow (ADR 0118): above a passed on message and above the input of such a draft. */
+function PassedOnLabel() {
+  return (
+    <div class="passed-on">
+      <Icons.ForwardMessage size={14} />
+      <span>{texts.chat.passedOn}</span>
+    </div>
+  )
+}
+
 function ReplyBar({ m, onCancel }: { m: Msg; onCancel: () => void }) {
   const q = quoteOf(m)
   return (
@@ -653,6 +770,62 @@ function attachmentLabel(a: Att): string {
   return a.name || (a.type === 'pdf' ? texts.attachment.pdf : a.type === 'jpg' ? texts.attachment.photo : texts.attachment.file)
 }
 
+/** The bytes of an attachment, from this browser or the relays; `null` if it cannot be had right now. */
+async function attachmentBytes(m: Msg, a: Att): Promise<Uint8Array | null> {
+  const url = await attachmentUrl(m, a, mimeOf(a.type, attachmentLabel(a))).catch(() => null)
+  if (!url) return null
+  return new Uint8Array(await (await fetch(url)).arrayBuffer())
+}
+
+/** One line for „An wen weiterleiten?“: the text, otherwise the attachments. */
+export function forwardPreview(m: Msg): string {
+  return m.text.trim() || m.attachments.map(attachmentLabel).join(', ')
+}
+
+/**
+ * „Weiterleiten“ (as in the app): text and attachments of [m] go into the draft of [conv]; only the send button sends.
+ * Attachments are sealed again with a new key when sent (no references across spaces in ANDP). `null` if it worked,
+ * otherwise what is to be said.
+ */
+export async function forwardInto(conv: ConvKey, m: Msg): Promise<string | null> {
+  const list: Draft[] = []
+  for (const a of m.attachments) {
+    const bytes = await attachmentBytes(m, a)
+    if (!bytes) return texts.viewer.cantShow
+    const prepared: Prepared = { bytes, type: a.type, name: a.type === 'jpg' ? '' : a.name, width: a.width, height: a.height }
+    const preview = a.type === 'jpg' ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/jpeg' })) : null
+    list.push({ key: crypto.randomUUID(), prepared, preview, label: attachmentLabel(a) })
+  }
+  // The text of a voice message may be its automatic preview, not the sender's words; the recording goes alone.
+  addToDraft(conv, m.attachments.some((a) => a.type === 'm4a') ? '' : m.text, list)
+  return null
+}
+
+/** The page may hand things to the system's share menu (Web Share API). */
+function canShare(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+}
+
+/** „Teilen…“: text and files of [m] into the system's share menu; `null` if it opened or was canceled. */
+async function shareMessage(m: Msg): Promise<string | null> {
+  const files: File[] = []
+  for (const a of m.attachments) {
+    const bytes = await attachmentBytes(m, a)
+    if (!bytes) return texts.viewer.cantShow
+    const item = fileItem(m, a)
+    files.push(new File([bytes as BlobPart], item.name, { type: mimeOf(a.type, item.name) }))
+  }
+  const text = m.attachments.some((a) => a.type === 'm4a') ? '' : m.text.trim()
+  const data: ShareData = { ...(text ? { text } : {}), ...(files.length ? { files } : {}) }
+  if (navigator.canShare && !navigator.canShare(data)) return texts.viewer.cantShow
+  try {
+    await navigator.share(data)
+    return null
+  } catch (e) {
+    return e instanceof DOMException && e.name === 'AbortError' ? null : texts.viewer.cantShow
+  }
+}
+
 /** Attachment for downloading or storing; photos without a name get one. */
 function fileItem(m: Msg, a: Att): FileItem {
   const name = attachmentLabel(a)
@@ -764,6 +937,8 @@ function Composer({
 }) {
   const text = useSignal('')
   const drafts = useSignal<Draft[]>([])
+  // The draft came from „Weiterleiten“ (ADR 0118); gone once it is sent or emptied.
+  const passedOn = useSignal(false)
   const problem = useSignal('')
   const preparing = useSignal(0)
   const dragging = useSignal(false)
@@ -780,6 +955,7 @@ function Composer({
   useEffect(() => {
     text.value = draftText(conv)
     drafts.value = draftFiles<Draft>(conv)
+    passedOn.value = draftPassedOn(conv)
     problem.value = ''
     const a = area.current
     if (a) {
@@ -789,6 +965,33 @@ function Composer({
     }
     return () => saveDraftFiles(conv, drafts.value)
   }, [conv])
+
+  // Forwarded into this conversation (also while it is open): below the text, to the attachments (as in the app).
+  useEffect(() => {
+    const inc = takeIncoming<Draft>(conv)
+    if (!inc) return
+    passedOn.value = true
+    if (inc.text) {
+      text.value = text.value.trim() ? `${text.value.trimEnd()}\n${inc.text}` : inc.text
+      saveDraftText(conv, text.value)
+    }
+    let add = inc.files
+    // A voice message goes alone (ADR 0030).
+    if (add.some((d) => d.prepared.type === 'm4a') && drafts.value.length + add.length > 1) {
+      add = add.filter((d) => d.prepared.type !== 'm4a')
+      problem.value = texts.compose.maxAttachments(1)
+    }
+    const room = LIMITS.perMessage - drafts.value.length
+    if (add.length > room) problem.value = texts.compose.maxAttachments(LIMITS.perMessage)
+    drafts.value = [...drafts.value, ...add.slice(0, Math.max(room, 0))]
+    const a = area.current
+    if (a) a.style.height = `${Math.min(a.scrollHeight, 200)}px`
+  }, [conv, incomingDrafts.value])
+
+  useEffect(() => {
+    if (passedOn.value && !text.value.trim() && !drafts.value.length) passedOn.value = false
+    saveDraftPassedOn(conv, passedOn.value)
+  }, [conv, passedOn.value, text.value, drafts.value])
 
   // Answering: straight into the input.
   useEffect(() => {
@@ -859,7 +1062,9 @@ function Composer({
     if (area.current) area.current.style.height = ''
     const answering = reply ?? undefined
     onCancelReply()
-    void send(conv, t, files, undefined, answering)
+    const passing = passedOn.value
+    passedOn.value = false
+    void send(conv, t, files, undefined, answering, passing)
   }
 
   return (
@@ -890,6 +1095,7 @@ function Composer({
         if (e.dataTransfer?.files.length) void addFiles(e.dataTransfer.files)
       }}
     >
+      {passedOn.value && <PassedOnLabel />}
       {reply && <ReplyBar m={reply} onCancel={onCancelReply} />}
       {(drafts.value.length > 0 || preparing.value > 0 || problem.value) && (
         <div class="drafts">
@@ -986,6 +1192,56 @@ function Composer({
         </button>
       </div>
     </form>
+  )
+}
+
+// --- Introduced contact as a card (like IntroCardBox of the app, ADR 0116) -----------------------------------------
+
+function IntroCardView({ intro, sender, own }: { intro: IntroCard; sender: string; own: boolean }) {
+  const [asking, setAsking] = useState(false)
+  const [note, setNote] = useState('')
+  const state = introState(intro, own, people.value.get(intro.person)?.contact === true, sentRequests.value.some((r) => r.person === intro.person), Date.now())
+  const t = texts.people
+  const status = introStatus(state)
+  const action = state === 'open' ? t.introAdd : undefined
+  const body = (
+    <>
+      <span class="invite-top">
+        <span class="invite-icon">
+          <Icons.Person size={22} />
+        </span>
+        <span class="invite-texts">
+          <span class="invite-sentence">{own ? t.introCardOwn(intro.name) : t.introCardIncoming(sender, intro.name)}</span>
+          {(note || status) && <span class="invite-status">{note || status}</span>}
+        </span>
+      </span>
+      {action && <span class="invite-action">{action}</span>}
+    </>
+  )
+  return (
+    <>
+      {action ? (
+        <button type="button" class="invite-card" onClick={() => setAsking(true)}>
+          {body}
+        </button>
+      ) : (
+        <div class="invite-card">{body}</div>
+      )}
+      {asking && (
+        <Confirm
+          title={t.introConfirmTitle(intro.name)}
+          text={t.introConfirmText(intro.name)}
+          confirm={t.introAdd}
+          danger={false}
+          onConfirm={async () => {
+            const r = await acceptIntro(intro)
+            setNote(r === 'requested' ? t.requestSent(intro.name) : r === 'known' ? t.alreadyContact : t.introExpired)
+            setAsking(false)
+          }}
+          onClose={() => setAsking(false)}
+        />
+      )}
+    </>
   )
 }
 

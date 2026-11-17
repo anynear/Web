@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findInviteLinks, withoutInviteLinks } from '../src/core/invites'
+import { circleToJoin, findInviteLinks, withoutInviteLinks } from '../src/core/invites'
 
 describe('invites', () => {
   it('finds circle, contact, channel and device links, not other addresses', () => {
@@ -20,5 +20,14 @@ describe('invites', () => {
     expect(withoutInviteLinks('Join my circle “Garden” on anynear: https://anynear.app/k#AAA')).toBe('')
     expect(withoutInviteLinks('Testname bei anynear. Tippe auf den Link, um mich als Kontakt hinzuzufügen: https://anynear.app/c#B')).toBe('')
     expect(withoutInviteLinks('Testname lädt dich zum Kanal „Haus“ bei anynear ein: https://anynear.app/a#C')).toBe('')
+  })
+
+  it('asks before joining a circle, with who invites', () => {
+    expect(circleToJoin({ kind: 'circle', name: 'Garten', joined: false, inviter: ' Anna ' })).toEqual({ name: 'Garten', inviter: 'Anna' })
+    // Links of older apps do not name who invites.
+    expect(circleToJoin({ kind: 'circle', name: 'Garten', joined: false, inviter: '' })).toEqual({ name: 'Garten', inviter: '' })
+    expect(circleToJoin({ kind: 'circle', name: 'Garten', joined: true, inviter: 'Anna' })).toBeNull()
+    expect(circleToJoin({ kind: 'contact', name: 'Anna', joined: false })).toBeNull()
+    expect(circleToJoin(null)).toBeNull()
   })
 })
