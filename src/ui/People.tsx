@@ -35,12 +35,65 @@ function matches(query: string, ...values: (string | undefined)[]): boolean {
   return !q || values.some((v) => v?.toLowerCase().includes(q))
 }
 
+/** Circles and contacts whose name fits [q], without those in [exclude] (conversation keys). */
+export function pickHits(q: string, exclude: ReadonlySet<string> = new Set()): { circles: CircleView[]; people: Person[] } {
+  return {
+    circles: circles.value.filter((c) => !c.removed && !exclude.has(circleKey(c.id)) && matches(q, c.name)),
+    people: contacts.value.filter(
+      (p) => !exclude.has(directKey(p.id)) && matches(q, p.name, p.profileName, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)),
+    ),
+  }
+}
+
+/** Opens the conversation with a circle or contact chosen from [PickSections]. */
+function pick(key: ConvKey) {
+  newMessage.value = false
+  pane.value = 'chat'
+  chatSearch.value = false
+  open(key)
+}
+
+/** „Kreise“ and „Kontakte“ to choose from, as on „Neue Nachricht“; also below the search hits of „Nachrichten“. */
+export function PickSections({ hits, onPick = pick }: { hits: ReturnType<typeof pickHits>; onPick?: (key: ConvKey) => void }) {
+  return (
+    <>
+      {hits.circles.length > 0 && (
+        <>
+          <h2 class="section-title nav-title">{texts.list.circles}</h2>
+          {hits.circles.map((c) => (
+            <button key={c.id} type="button" class="conv" onClick={() => onPick(circleKey(c.id))}>
+              <Avatar id={c.id} kind="circle" size={40} image={c.image} />
+              <span class="conv-body">
+                <span class="conv-name">{c.name}</span>
+                <span class="conv-preview">{circleSummary(c)}</span>
+              </span>
+            </button>
+          ))}
+        </>
+      )}
+      {hits.people.length > 0 && (
+        <>
+          <h2 class="section-title nav-title">{texts.list.contacts}</h2>
+          {hits.people.map((p) => (
+            <button key={p.id} type="button" class="conv" onClick={() => onPick(directKey(p.id))}>
+              <Avatar id={p.id} kind="person" size={40} image={p.image} />
+              <span class="conv-body">
+                <span class="conv-name">{p.name || texts.system.someone}</span>
+                <span class="conv-preview">{originOf(p)}</span>
+              </span>
+            </button>
+          ))}
+        </>
+      )}
+    </>
+  )
+}
+
 /** „Neue Nachricht“: whom do you want to write to? Tapping opens the conversation, an existing one is continued. */
 export function NewMessageNav() {
   const query = useSignal('')
   const q = query.value
-  const shownCircles = circles.value.filter((c) => !c.removed && matches(q, c.name))
-  const shownPeople = contacts.value.filter((p) => matches(q, p.name, p.profileName, ...p.circles.map((id) => circles.value.find((c) => c.id === id)?.name)))
+  const hits = pickHits(q)
   // „Weiterleiten“ uses the same choice (as the app): the message goes into the draft of the chosen conversation.
   const forward = forwarding.value
   const problem = useSignal('')
@@ -81,37 +134,9 @@ export function NewMessageNav() {
         <input class="input search" type="search" placeholder={texts.list.searchName} value={q} onInput={(e) => (query.value = e.currentTarget.value)} />
       </div>
       <div class="files-nav">
-        {shownCircles.length === 0 && shownPeople.length === 0 && q && <p class="muted small nav-note">{texts.people.noResults}</p>}
-        {shownCircles.length > 0 && (
-          <>
-            <h2 class="section-title nav-title">{texts.list.circles}</h2>
-            {shownCircles.map((c) => (
-              <button key={c.id} type="button" class="conv" onClick={() => pick(circleKey(c.id))}>
-                <Avatar id={c.id} kind="circle" size={40} image={c.image} />
-                <span class="conv-body">
-                  <span class="conv-name">{c.name}</span>
-                  <span class="conv-preview">{circleSummary(c)}</span>
-                </span>
-              </button>
-            ))}
-          </>
-        )}
-        {shownPeople.length > 0 ? (
-          <>
-            <h2 class="section-title nav-title">{texts.list.contacts}</h2>
-            {shownPeople.map((p) => (
-              <button key={p.id} type="button" class="conv" onClick={() => pick(directKey(p.id))}>
-                <Avatar id={p.id} kind="person" size={40} image={p.image} />
-                <span class="conv-body">
-                  <span class="conv-name">{p.name || texts.system.someone}</span>
-                  <span class="conv-preview">{originOf(p)}</span>
-                </span>
-              </button>
-            ))}
-          </>
-        ) : (
-          !q && <p class="muted small nav-note">{texts.list.noContactsYet}</p>
-        )}
+        {hits.circles.length === 0 && hits.people.length === 0 && q && <p class="muted small nav-note">{texts.people.noResults}</p>}
+        <PickSections hits={hits} onPick={pick} />
+        {hits.people.length === 0 && !q && <p class="muted small nav-note">{texts.list.noContactsYet}</p>}
       </div>
       {!forward && <div class="people-foot people-own">
         <Button kind="secondary" class="people-wide" onClick={() => { newMessage.value = false; dialog.value = 'addContact' }}>

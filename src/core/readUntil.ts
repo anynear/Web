@@ -36,8 +36,9 @@ export function hasNewer(a: ReadMarks, b: ReadMarks): boolean {
 /**
  * Whether a received message with send time [sentAt] that comes back while its conversation still loads counts as read:
  * up to the conversation's [mark]; without one (never read since this was introduced), everything sent before
- * [loadingSince], the moment this device began to load.
+ * [loadingSince], the moment this device began to load. Send times are whole seconds: one from the second loading began
+ * counts as sent after it.
  */
 export function readOnArrival(sentAt: number, mark: number | undefined, loadingSince: number): boolean {
-  return mark !== undefined ? sentAt <= mark : sentAt < loadingSince
+  return mark !== undefined ? sentAt <= mark : sentAt < loadingSince - (loadingSince % 1000)
 }

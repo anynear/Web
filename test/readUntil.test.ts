@@ -19,7 +19,13 @@ describe('read until', () => {
   })
 
   it('without a mark counts everything before loading as read', () => {
-    expect(readOnArrival(499, undefined, 500)).toBe(true)
-    expect(readOnArrival(500, undefined, 500)).toBe(false)
+    expect(readOnArrival(499_000, undefined, 500_000)).toBe(true)
+    expect(readOnArrival(500_000, undefined, 500_000)).toBe(false)
+  })
+
+  it('counts a message from the second loading began as unread', () => {
+    // Send times are whole seconds: sent at 500.7 s it says 500 s, after loading began at 500.4 s.
+    expect(readOnArrival(500_000, undefined, 500_400)).toBe(false)
+    expect(readOnArrival(499_000, undefined, 500_400)).toBe(true)
   })
 })

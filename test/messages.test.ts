@@ -13,15 +13,22 @@ import {
   shownStatus,
   summarize,
   listedConversations,
+  sortOverview,
   quoteOf,
   repliedTo,
   replyOf,
   QUOTE_CHARS,
+  peerMoves,
+  tabTitle,
+  textChars,
+  textLeft,
+  charsLeftHint,
+  limitInput,
 } from '../src/core/messages'
 import { pickTexts } from '../src/i18n'
 import { de } from '../src/i18n/de'
 import { en } from '../src/i18n/en'
-import { formatStorageSize, splitLinks } from '../src/ui/format'
+import { formatStorageSize, formatVoiceDuration, splitLinks } from '../src/ui/format'
 
 function out(over: Partial<Msg> = {}): Msg {
   return { id: 'm1', conv: 'c:k', mid: 'm1', outgoing: true, text: 'Hallo', ts: 1, status: 'sent', attachments: [], ...over }
@@ -106,6 +113,63 @@ describe('Übersicht', () => {
     ])
     expect(s.get('c:k')).toMatchObject({ unread: 2, last: { id: '2' } })
     expect(s.get('d:p')?.unread).toBe(0)
+  })
+
+  it('Zeile nach einer Vorstellung ersetzt im Direktchat nicht die letzte Nachricht (wie in der App)', () => {
+    const line = (id: string, ts: number) => out({ id, conv: 'd:isa', ts, outgoing: false, system: true, text: 'Isa would like to add Kevin. Kevin still has to accept.' })
+    const s = summarize([out({ id: '1', conv: 'd:isa', ts: 5, text: 'Fünf, halb sechs' }), line('sys|1', 16)])
+    expect(s.get('d:isa')?.last).toMatchObject({ id: '1', ts: 5 })
+    // Also in the other order, and with nothing else the line stands for the conversation.
+    expect(summarize([line('sys|1', 16), out({ id: '1', conv: 'd:isa', ts: 5 })]).get('d:isa')?.last.id).toBe('1')
+    expect(summarize([line('sys|1', 16)]).get('d:isa')?.last.id).toBe('sys|1')
+    // Lines in circles (joined, left …) stay the last message, as in the app.
+    expect(summarize([out({ id: '1', ts: 1 }), out({ id: 'sys|2', ts: 2, system: true })]).get('c:k')?.last.id).toBe('sys|2')
+  })
+})
+
+describe('Gespräch unter Geräte-ID („Jemand“)', () => {
+  // Kevin's own message „Wohoo“ came from another own device while only the device of the contact was known: its
+  // `peer` is the device ID. The web app showed it as a conversation of its own with „Someone“, the app moves it.
+  const people = new Map([['isa', ['isa-dev-1', 'isa-dev-2']]])
+  const personOfDevice = (id: string) => [...people].find(([, devices]) => devices.includes(id))?.[0] ?? id
+
+  it('wandert zur Person, sobald deren Gerät bekannt ist', () => {
+    expect(peerMoves(['d:isa-dev-1', 'd:isa', 'c:kreis'], personOfDevice, 'kevin')).toEqual(new Map([['d:isa-dev-1', 'd:isa']]))
+  })
+
+  it('bleibt, solange niemand dazu bekannt ist, und nie zur eigenen Person', () => {
+    expect(peerMoves(['d:unbekannt'], personOfDevice, 'kevin').size).toBe(0)
+    expect(peerMoves(['d:kevin-dev'], (id) => (id === 'kevin-dev' ? 'kevin' : id), 'kevin').size).toBe(0)
+  })
+})
+
+describe('Sprachnachricht', () => {
+  it('Dauer wie in der App', () => {
+    expect(formatVoiceDuration(7_400)).toBe('0:07')
+    expect(formatVoiceDuration(59_600)).toBe('1:00')
+    expect(formatVoiceDuration(0)).toBe('0:00')
+  })
+})
+
+describe('Tab-Titel', () => {
+  it('mit Zahl nur bei neuen Nachrichten', () => {
+    expect(tabTitle('anynear', 12)).toBe('(12) anynear')
+    expect(tabTitle('anynear', 0)).toBe('anynear')
+  })
+})
+
+describe('Textgrenze in Zeichen', () => {
+  it('zählt Codepoints, nicht Bytes', () => {
+    expect(textChars('Grüße')).toBe(5)
+    expect(textChars('👍')).toBe(1)
+    expect(textChars('ä'.repeat(1000))).toBe(1000)
+    expect(new TextEncoder().encode('ä'.repeat(1000)).length).toBe(2000)
+    // Joined emoji count each code point; every code point is at most 4 bytes.
+    expect(textChars('👨‍👩‍👧')).toBe(5)
+    expect(textChars('🇩🇪')).toBe(2)
+    expect(new TextEncoder().encode('😀'.repeat(1000)).length).toBe(4000)
+    // The limit of 4096 characters stays within 16384 bytes.
+    expect(new TextEncoder().encode('😀'.repeat(4096)).length).toBe(16384)
   })
 })
 
@@ -231,5 +295,44 @@ describe('Antworten (ADR 0092)', () => {
     expect(quoteOf(inc({ text: '', attachments: [att('zip')] }))).toMatchObject({ kind: 'attachment', type: 'file' })
     expect(quoteOf(inc({ text: '', deleted: true }))).toMatchObject({ kind: 'deleted', outgoing: false })
     expect(quoteOf(null)).toEqual({ kind: 'missing' })
+  })
+})
+
+describe('Zähler „Noch n Zeichen“ wie in der App', () => {
+  const t = { charsLeft: (n: number) => `Noch ${n} Zeichen`, charsTooMany: (n: number) => `${n} Zeichen zu viel` }
+  const fits = (s: string) => textLeft(s, 10) >= 0
+
+  it('zählt nach trim() und zeigt den Hinweis erst kurz vor der Grenze', () => {
+    expect(textLeft('  Grüße 👍  ', 1000)).toBe(993)
+    expect(charsLeftHint(31, 30, t)).toBeNull()
+    expect(charsLeftHint(30, 30, t)).toBe('Noch 30 Zeichen')
+    expect(charsLeftHint(0, 30, t)).toBe('Noch 0 Zeichen')
+    expect(charsLeftHint(-3, 30, t)).toBe('3 Zeichen zu viel')
+  })
+
+  it('kürzt nur das neu Eingefügte, auch in der Mitte, ohne ein Emoji zu zerschneiden', () => {
+    expect(limitInput('Hallo', 'Hallo Welt!!', fits)).toBe('Hallo Welt')
+    expect(limitInput('Hallo Welt', 'Hallo XXWelt', fits)).toBe('Hallo Welt')
+    expect(limitInput('123456789', '123456789😀😀', fits)).toBe('123456789😀')
+    expect(limitInput('12345678', '1234😀5678', (s) => textLeft(s, 8) >= 0)).toBe('12345678')
+    // Deleting is always possible, also above the limit; leading and trailing spaces do not count.
+    expect(limitInput('12345678901', '1234567890', fits)).toBe('1234567890')
+    expect(limitInput('1234567890', '1234567890   ', fits)).toBe('1234567890   ')
+  })
+})
+
+describe('sortOverview', () => {
+  it('eine Liste nach neuestem Ereignis, dann ohne bekannten Zeitpunkt nach Name, verlassene Kreise unten (wie die App)', () => {
+    const rows = sortOverview([
+      { name: 'Familie', ts: 10 },
+      { name: 'Freunde', ts: 0 },
+      { name: 'Chor', ts: 0, since: 25 },
+      { name: 'Alter Kreis', ts: 5, removed: true },
+      { name: 'Anna', ts: 20, since: 40 },
+      { name: 'Ben', ts: 0, since: 30 },
+      { name: 'Clara', ts: 0, since: 15 },
+      { name: 'Dora', ts: 0, since: 0 },
+    ])
+    expect(rows.map((r) => r.name)).toEqual(['Anna', 'Ben', 'Chor', 'Clara', 'Familie', 'Dora', 'Freunde', 'Alter Kreis'])
   })
 })

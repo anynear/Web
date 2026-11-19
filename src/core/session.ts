@@ -66,12 +66,15 @@ import {
   newMid,
   ownHistoryOf,
   parseKey,
+  peerMoves,
   pendingDelete,
   repliedTo,
   replyOf,
   summarize,
+  tabTitle,
   type IntroCard,
 } from './messages'
+import { draftText, saveDraftText } from './drafts'
 import { browserDeviceName } from './device'
 import { requestOriginText, withoutAsking } from './requests'
 import { READ_UNTIL_SETTING, decodeMarks, hasNewer, mergeMarks, readOnArrival, type ReadMarks } from './readUntil'
@@ -118,6 +121,8 @@ export interface Person {
   image: ImageRef | null
   circles: string[]
   contact: boolean
+  /** When the person became a contact (ms), from its first device; 0 = unknown or no contact. */
+  addedAt: number
 }
 
 export interface CircleView {
@@ -126,6 +131,8 @@ export interface CircleView {
   removed: boolean
   historyPending: boolean
   image: ImageRef | null
+  /** When one joined or created the circle (ms); 0 = unknown. */
+  joinedAt: number
   /** Persons in the circle, the own one first. */
   members: Person[]
   /** How many of one's own devices are in the circle, this one included (ADR 0042). */
@@ -134,8 +141,11 @@ export interface CircleView {
 
 /** How long pairing waits for the phone (like the app: 10 minutes). */
 const PAIRING_WAIT_S = 600
-/** Maximum length of a text with internet path (ADR 0031): 1000 bytes. */
-export const MAX_TEXT_BYTES = 1000
+/**
+ * Maximum length of a text with internet path (ADR 0031): 4096 characters, counted as Unicode code points
+ * ([textChars], after `trim()`), the same in the app. At most 16384 bytes in UTF-8; radio keeps its own, smaller limit.
+ */
+export const MAX_TEXT_CHARS = 4096
 
 export const phase = signal<Phase>('loading')
 /** Guided steps after pairing (ADR 0073 §9): notifications and official warnings, once per browser. */
@@ -254,7 +264,7 @@ function takeReadMarks(text: string | null | undefined) {
   }
 }
 
-/** When this device began to load the messages after the emergency card or being added; noted the first time. */
+/** When this device began to load the messages after the emergency card or being added; noted at its first start. */
 function loadingSince(): number {
   const known = Number(local.get('history.loadingSince'))
   if (known > 0) return known
@@ -339,6 +349,32 @@ if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
   })
 }
 
+// The same number in the title of the browser tab (also without an installed web app).
+if (typeof document !== 'undefined') {
+  effect(() => {
+    document.title = tabTitle(texts.appName, badgeCount.value)
+  })
+}
+
+// A device became a person (ADR 0042): its direct conversation moves to the person, as in the app.
+const pendingPeerMoves = computed(() => peerMoves(summaries.value.keys(), personOfDevice, me.value?.personId))
+effect(() => {
+  if (pendingPeerMoves.value.size) queueMicrotask(movePeers)
+})
+
+function movePeers() {
+  const moves = pendingPeerMoves.value
+  if (!moves.size) return
+  void save(messages.value.filter((m) => moves.has(m.conv)).map((m) => ({ ...m, conv: moves.get(m.conv)! })))
+  for (const [from, to] of moves) {
+    if (!draftText(to) && draftText(from)) saveDraftText(to, draftText(from))
+    saveDraftText(from, '')
+    if ((readMarks[from] ?? 0) > (readMarks[to] ?? 0)) setReadMarks({ ...readMarks, [to]: readMarks[from] })
+  }
+  const opened = openConv.value
+  if (opened && moves.has(opened)) openConv.value = moves.get(opened)!
+}
+
 let db: MessageDb | null = null
 /** Deletions whose message is still missing (ADR 0068); also in IndexedDB, 30 days. */
 let pendingDeletes: PendingDelete[] = []
@@ -384,6 +420,9 @@ export async function boot() {
   })
   c.onState(() => refresh())
   c.onLoading(() => refreshLoading())
+  // Note when this device began to load before anything arrives (ADR 0107 §8). Noted only once a message came back
+  // while loading, a circle joined later counted everything sent before that moment as read and sent no read receipt.
+  loadingSince()
   const deviceId = await c.start()
   refreshLoading()
   void c.setting(READ_UNTIL_SETTING).then(takeReadMarks).catch(() => {})
@@ -537,13 +576,13 @@ function refresh() {
   const ident = c.identity()
   // The core does not list the own person among the members; the own other devices it does.
   const ownId = ident?.personId ?? me.value?.personId ?? ''
-  const own: Person = { id: ownId, name: ownName.value, profileName: ownName.value, devices: c.ownDevices().map((d) => d.deviceId), image: null, circles: [], contact: false }
+  const own: Person = { id: ownId, name: ownName.value, profileName: ownName.value, devices: c.ownDevices().map((d) => d.deviceId), image: null, circles: [], contact: false, addedAt: 0 }
   const personOf = (m: MemberState): Person => {
     const id = m.person
     if (id === ownId) return own
     let p = all.get(id)
     if (!p) {
-      p = { id, name: m.name, profileName: m.name, devices: [], image: m.image ?? null, circles: [], contact: false }
+      p = { id, name: m.name, profileName: m.name, devices: [], image: m.image ?? null, circles: [], contact: false, addedAt: 0 }
       all.set(id, p)
     }
     if (!p.devices.includes(m.deviceId)) p.devices.push(m.deviceId)
@@ -560,9 +599,14 @@ function refresh() {
       if (!p.circles.includes(s.id)) p.circles.push(s.id)
       if (!members.includes(p)) members.push(p)
     }
-    return { id: s.id, name: s.name, removed: s.removed, historyPending: s.historyPending, image: s.image ?? null, members, ownDevices: Math.max(ownHere.size, 1) }
+    return { id: s.id, name: s.name, removed: s.removed, historyPending: s.historyPending, image: s.image ?? null, joinedAt: Number(s.joinedAt), members, ownDevices: Math.max(ownHere.size, 1) }
   })
-  for (const m of c.contacts()) personOf(m).contact = true
+  for (const m of c.contacts()) {
+    const p = personOf(m)
+    p.contact = true
+    const added = Number(m.addedAt)
+    if (added > 0 && (p.addedAt === 0 || added < p.addedAt)) p.addedAt = added
+  }
   own.contact = false
   // Own names cover the names from the profiles everywhere (like Person.merge in the app).
   const ownNames = activeContactNames(contactNameEntries.value)
@@ -1100,7 +1144,16 @@ export async function refreshRequests() {
   const before = new Set(contactRequests.value.map((r) => r.person))
   const now = [...(await core.contactRequests())]
   contactRequests.value = now
+  const sentBefore = sentRequests.value
   sentRequests.value = [...(await core.sentContactRequests())]
+  // A request of ours that ended before its time was answered: the person agreed. A line in the chat with it, as in
+  // the app (an expired one ended without an answer).
+  const at = Date.now()
+  const sentNow = new Set(sentRequests.value.map((r) => r.person))
+  const answered = sentBefore.filter((r) => !sentNow.has(r.person) && (!r.until || Number(r.until) > at))
+  // A request over a contact link names the device, not the person: the line goes to the chat with the person.
+  if (answered.length) refresh()
+  void save(answered.map((r) => ({ id: `sys|${newMid()}`, conv: directKey(personOfDevice(r.deviceId ?? r.person)), outgoing: false, text: texts.people.requestAnsweredLine(r.name), ts: at, attachments: [], system: true })))
   for (const r of now) {
     if (before.has(r.person)) continue
     void showNotification(texts.people.requestTitle(r.name), requestOrigin(r), `request|${r.person}`, {})
@@ -1112,11 +1165,19 @@ export function requestOrigin(r: ContactRequest): string {
   return requestOriginText(r.introducedByName)
 }
 
-export async function acceptRequest(person: string): Promise<boolean> {
+/**
+ * Agree to the request of [person]: it becomes a contact. A line in the chat with it and the chat opens, as in the app.
+ * The conversation to open, `null` if there is no such request (any more).
+ */
+export async function acceptRequest(person: string): Promise<ConvKey | null> {
+  const name = contactRequests.value.find((r) => r.person === person)?.name
   const ok = await core!.acceptContactRequest(person)
   await refreshRequests()
   refresh()
-  return ok
+  if (!ok || name === undefined) return null
+  const conv = directKey(person)
+  await save([{ id: `sys|${newMid()}`, conv, outgoing: false, text: texts.people.requestAcceptedLine(name), ts: Date.now(), attachments: [], system: true }])
+  return conv
 }
 
 /** Silent: the person learns nothing; what it wrote is deleted here. */

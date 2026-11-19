@@ -230,6 +230,8 @@ button { font: inherit; color: inherit; }
 .list-action svg { color: var(--muted); }
 
 .conversations { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+/* Search hits without a conversation yet (ADR 0100 §2), below the conversations. */
+.search-more { display: grid; gap: 2px; margin-top: 6px; }
 .conv {
   width: 100%; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: 12px;
   background: transparent; text-align: left; cursor: pointer;
@@ -314,7 +316,8 @@ button { font: inherit; color: inherit; }
 .out .picker { right: 0; }
 .picker button { width: 40px; height: 40px; border: 0; border-radius: 999px; background: none; font-size: 1.3rem; cursor: pointer; }
 .picker button:hover, .picker button.chosen { background: var(--active); }
-.picker .picker-action { width: auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 0.95rem; color: var(--text); }
+/* Actions as icons only; the label is in aria-label and the tooltip. */
+.picker .picker-action { display: inline-grid; place-items: center; color: var(--text); }
 .picker button + .picker-action { margin-left: 4px; border-left: 1px solid var(--line); border-radius: 0 999px 999px 0; }
 .deleted-line {
   display: inline-flex; align-items: baseline; gap: 8px; padding: 6px 12px; border-radius: 14px; border: 1px dashed var(--line);
@@ -343,7 +346,17 @@ button { font: inherit; color: inherit; }
 .att-photo { display: block; margin: 2px -6px 6px; border-radius: 12px; overflow: hidden; max-width: 360px; }
 .att-photo img { display: block; width: 100%; height: auto; object-fit: cover; }
 .att-photo.placeholder { display: grid; place-content: center; justify-items: center; gap: 6px; background: rgba(100, 116, 139, 0.18); min-height: 120px; width: 280px; font-size: 0.85rem; text-align: center; padding: 12px; }
-.att-audio { display: block; width: min(320px, 100%); margin: 4px 0; }
+.att-voice {
+  display: flex; align-items: center; gap: 4px; width: 240px; max-width: 100%; margin: 4px 0 6px; padding: 2px 12px 2px 2px;
+  border-radius: 10px; background: rgba(100, 116, 139, 0.14);
+}
+.att-voice-btn { flex: none; }
+.att-voice-btn:disabled { opacity: 0.5; cursor: default; }
+.att-voice-body { flex: 1; min-width: 0; display: grid; gap: 4px; padding: 8px 0; }
+.att-voice-track { height: 4px; border-radius: 2px; background: rgba(100, 116, 139, 0.3); overflow: hidden; }
+.att-voice-track span { display: block; height: 100%; background: currentColor; }
+.att-voice-time { font-size: 0.8rem; opacity: 0.8; font-variant-numeric: tabular-nums; }
+.att-voice-time.warn { color: var(--warnrot); opacity: 1; }
 .att-file {
   display: flex; align-items: center; gap: 10px; width: min(320px, 100%); margin: 4px 0 6px; padding: 10px 12px;
   border-radius: 10px; border: 1px solid rgba(100, 116, 139, 0.35); background: rgba(100, 116, 139, 0.1); cursor: pointer; text-align: left; color: inherit;
@@ -356,6 +369,7 @@ button { font: inherit; color: inherit; }
 .composer-field { flex: 1; display: grid; gap: 4px; }
 .composer textarea { resize: none; max-height: 200px; font-size: 1.05rem; line-height: 1.4; border-radius: 24px; padding: 12px 18px; background: var(--field); border-color: transparent; }
 .field-error { color: var(--warnrot); font-size: 0.85rem; padding-left: 18px; }
+.field-limit { text-align: right; padding: 0 18px 0 0; }
 .send-btn { width: 48px; height: 48px; border-radius: 999px; border: 0; background: var(--signalorange); color: var(--nachtblau); display: grid; place-items: center; cursor: pointer; flex: none; }
 .send-btn:disabled { background: var(--line); color: var(--muted); cursor: default; }
 .composer-note { padding: 16px clamp(12px, 4vw, 40px); border-top: 1px solid var(--line); color: var(--muted); text-align: center; background: var(--surface); }
@@ -666,6 +680,7 @@ button.invite-card:hover { border-color: var(--signalorange); }
 button.invite-card:focus-visible { outline: 3px solid var(--bernstein); outline-offset: 2px; }
 .invite-top { display: flex; align-items: center; gap: 12px; }
 .invite-icon { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--orange-hell); color: var(--nachtblau); }
+.intro-photo { object-fit: cover; padding: 0; }
 .invite-icon.broken { background: var(--active); color: var(--muted); }
 .invite-texts { display: grid; gap: 2px; min-width: 0; }
 .invite-sentence { font-size: 1rem; overflow-wrap: anywhere; }

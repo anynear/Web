@@ -27,9 +27,12 @@ import {
   searchable,
   shownLink,
   shownStatus,
+  charsLeftHint,
+  limitInput,
+  textLeft,
 } from '../core/messages'
 import {
-  MAX_TEXT_BYTES,
+  MAX_TEXT_CHARS,
   attachmentUrl,
   attachmentArrived,
   canWrite,
@@ -58,7 +61,7 @@ import {
 import type { LinkPreview } from 'anmp-core'
 import { Avatar } from './Avatar'
 import { Button, Confirm, CopyLink, Dialog, Qr } from './components'
-import { formatDay, formatListTime, formatSize, formatTime, isSameDay, splitLinks } from './format'
+import { formatDay, formatListTime, formatSize, formatTime, formatVoiceDuration, isSameDay, splitLinks } from './format'
 import * as Icons from './icons'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
@@ -412,6 +415,9 @@ function Bubble({
   const invites = m.text ? findInviteLinks(m.text) : []
   // With an introduction (ADR 0116) the card says it all; the text is only the stand-in for older apps.
   const text = m.intro ? '' : invites.length ? withoutInviteLinks(m.text, invites) : m.text
+  // Its picture goes along as a photo (ADR 0116 §2); the card shows it small as the profile picture instead.
+  const introPhoto = m.intro ? m.attachments.find((a) => a.type === 'jpg') : undefined
+  const attachments = introPhoto ? m.attachments.filter((a) => a !== introPhoto) : m.attachments
   const link = shownLink(m)
   // One does not react to own messages (as in the app); every message can be deleted.
   const canReact = !!m.mid && !m.outgoing
@@ -435,7 +441,12 @@ function Bubble({
       <div
         class="bubble"
         onContextMenu={(e) => {
-          if ((e.target as HTMLElement).closest('a, audio')) return
+          const target = e.target as HTMLElement
+          if (target.closest('a, .att-voice')) return
+          // Marked text keeps the browser's menu (copy); with the menu open, a long press on the text marks it.
+          const marked = window.getSelection()
+          if (marked && !marked.isCollapsed && e.currentTarget.contains(marked.anchorNode)) return
+          if (picking && target.closest('.bubble-text')) return
           e.preventDefault()
           // Like a long press in the app: opens the menu, a second time closes it.
           setPicking(!picking)
@@ -444,7 +455,7 @@ function Bubble({
         {showName && <div class="bubble-name">{personName(m.fromPerson, m.fromName)}</div>}
         {m.passedOn && <PassedOnLabel />}
         {m.replyTo && <QuoteBox m={m} onOpen={onQuote} />}
-        {m.attachments.map((a) => (
+        {attachments.map((a) => (
           <Attachment key={a.id} m={m} a={a} />
         ))}
         {text && (
@@ -461,7 +472,7 @@ function Bubble({
           </div>
         )}
         {link && <LinkPreviewCard m={m} link={link} />}
-        {m.intro && <IntroCardView intro={m.intro} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />}
+        {m.intro && <IntroCardView m={m} intro={m.intro} photo={introPhoto} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />}
         {invites.map((l) => (
           <InviteCard key={l.start} link={l} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />
         ))}
@@ -505,9 +516,28 @@ function Bubble({
                   setPicking(false)
                   onReply()
                 }}
+                aria-label={texts.chat.reply}
+                title={texts.chat.reply}
               >
-                <Icons.Reply size={18} />
-                <span>{texts.chat.reply}</span>
+                <Icons.Reply size={20} />
+              </button>
+            )}
+            {/* The whole text at once; parts can be marked like any text on the page. */}
+            {text && (
+              <button
+                type="button"
+                role="menuitem"
+                class="picker-action"
+                onClick={() =>
+                  void navigator.clipboard.writeText(text).then(() => {
+                    setPicking(false)
+                    setFileNotice(texts.chat.textCopied)
+                  })
+                }
+                aria-label={texts.chat.copy}
+                title={texts.chat.copy}
+              >
+                <Icons.Copy size={20} />
               </button>
             )}
             <button
@@ -518,9 +548,10 @@ function Bubble({
                 setPicking(false)
                 forwarding.value = m
               }}
+              aria-label={texts.chat.forward}
+              title={texts.chat.forward}
             >
-              <Icons.ForwardMessage size={18} />
-              <span>{texts.chat.forward}</span>
+              <Icons.ForwardMessage size={20} />
             </button>
             {/* Into the system's share menu only via this explicit button (files are otherwise viewed in the page). */}
             {canShare() && (
@@ -529,20 +560,19 @@ function Bubble({
                 role="menuitem"
                 class="picker-action"
                 onClick={() => void shareMessage(m).then((problem) => problem && setFileNotice(problem))}
+                aria-label={texts.chat.share}
+                title={texts.chat.share}
               >
-                <Icons.Share size={18} />
-                <span>{texts.chat.share}</span>
+                <Icons.Share size={20} />
               </button>
             )}
             {files.length > 0 && (
               <>
-                <button type="button" role="menuitem" class="picker-action" onClick={() => setFileAction({ kind: 'download', items: files })}>
-                  <Icons.Download size={18} />
-                  <span>{texts.viewer.download}</span>
+                <button type="button" role="menuitem" class="picker-action" onClick={() => setFileAction({ kind: 'download', items: files })} aria-label={texts.viewer.download} title={texts.viewer.download}>
+                  <Icons.Download size={20} />
                 </button>
-                <button type="button" role="menuitem" class="picker-action" onClick={() => setFileAction({ kind: 'store', items: files })}>
-                  <Icons.Lock size={18} />
-                  <span>{texts.viewer.toFiles}</span>
+                <button type="button" role="menuitem" class="picker-action" onClick={() => setFileAction({ kind: 'store', items: files })} aria-label={texts.viewer.toFiles} title={texts.viewer.toFiles}>
+                  <Icons.Lock size={20} />
                 </button>
               </>
             )}
@@ -554,9 +584,10 @@ function Bubble({
                 setPicking(false)
                 setDeleting(true)
               }}
+              aria-label={texts.chat.delete}
+              title={texts.chat.delete}
             >
-              <Icons.Trash size={18} />
-              <span>{texts.chat.delete}</span>
+              <Icons.Trash size={20} />
             </button>
           </div>
         )}
@@ -852,6 +883,94 @@ function openAttachment(m: Msg, a: Att) {
   } else openViewer([item(a)])
 }
 
+/** The voice message playing right now: starting another one stops it (as in the app, one VoicePlayback per chat). */
+let playingVoice: HTMLAudioElement | null = null
+
+/**
+ * Voice message in the bubble as in the app (`VoiceRow` in ChatVoice.kt): play/pause, progress and duration, with a
+ * fixed width. The browser's own `<audio controls>` shrank to a few pixels in a bubble without its own width.
+ * As long as the recording is not here, [status] says why.
+ */
+function VoicePlayer({ url, durationMs, status }: { url: string | null; durationMs: number; status: string | null }) {
+  const audio = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [position, setPosition] = useState(0)
+  // Older messages carry no duration: then the one the browser reads from the file.
+  const [fileDuration, setFileDuration] = useState(0)
+  const [failed, setFailed] = useState(false)
+  const total = durationMs > 0 ? durationMs : fileDuration
+
+  useEffect(
+    () => () => {
+      const el = audio.current
+      if (el && playingVoice === el) playingVoice = null
+      el?.pause()
+    },
+    [],
+  )
+
+  async function toggle() {
+    const el = audio.current
+    if (!el || !url) return
+    if (!el.paused) {
+      el.pause()
+      return
+    }
+    if (playingVoice && playingVoice !== el) playingVoice.pause()
+    playingVoice = el
+    try {
+      setFailed(false)
+      await el.play()
+    } catch {
+      setFailed(true)
+    }
+  }
+
+  const active = playing || position > 0
+  const progress = total > 0 ? Math.min(1, position / total) : 0
+  const label = failed
+    ? texts.attachment.voiceCantPlay
+    : status ?? (active ? `${formatVoiceDuration(position)} / ${formatVoiceDuration(total)}` : formatVoiceDuration(total))
+  return (
+    <div class="att-voice">
+      <button
+        type="button"
+        class="icon-btn att-voice-btn"
+        aria-label={playing ? texts.attachment.pause : `${texts.attachment.play}: ${texts.attachment.voice}`}
+        disabled={!url}
+        onClick={() => void toggle()}
+      >
+        {playing ? <Icons.Pause /> : <Icons.Play />}
+      </button>
+      <div class="att-voice-body">
+        <div class="att-voice-track" role="progressbar" aria-label={texts.attachment.voice} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
+          <span style={{ width: `${progress * 100}%` }} />
+        </div>
+        <span class={`att-voice-time ${failed ? 'warn' : ''}`}>{label}</span>
+      </div>
+      {url && (
+        <audio
+          ref={audio}
+          src={url}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false)
+            setPosition(0)
+          }}
+          onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime * 1000)}
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration
+            if (Number.isFinite(d)) setFileDuration(d * 1000)
+          }}
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  )
+}
+
 function Attachment({ m, a }: { m: Msg; a: Att }) {
   const [url, setUrl] = useState<string | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'later'>(a.type === 'jpg' || a.type === 'm4a' ? 'loading' : 'idle')
@@ -901,7 +1020,7 @@ function Attachment({ m, a }: { m: Msg; a: Att }) {
     )
   }
   if (a.type === 'm4a') {
-    return url ? <audio class="att-audio" controls src={url} preload="metadata" /> : <div class="att-file muted">{texts.attachment.voice}</div>
+    return <VoicePlayer url={url} durationMs={a.duration} status={url ? null : state === 'later' ? texts.attachment.later : texts.attachment.loading} />
   }
   return (
     <button type="button" class="att-file" aria-label={`${texts.attachment.open}: ${name}`} onClick={() => openAttachment(m, a)}>
@@ -922,6 +1041,9 @@ interface Draft {
   preview: string | null
   label: string
 }
+
+/** From this few free characters on, the input shows how many are left (TEXT_HINT_BELOW in the app). */
+const TEXT_HINT_BELOW = 100
 
 function Composer({
   conv,
@@ -946,8 +1068,10 @@ function Composer({
   const picker = useRef<HTMLInputElement>(null)
   const camera = useRef<HTMLInputElement>(null)
   const writable = canWrite(conv)
-  const bytes = new TextEncoder().encode(text.value).length
-  const tooLong = bytes > MAX_TEXT_BYTES
+  // As in the app (TextLimit, TEXT_HINT_BELOW): input stops at the limit, a hint shortly before it.
+  const left = textLeft(text.value, MAX_TEXT_CHARS)
+  const tooLong = left < 0
+  const limitHint = charsLeftHint(left, TEXT_HINT_BELOW, texts.chat)
   // Attachment too large or too many: hint at the plan that allows more (ADR 0076 §1a), as in the app.
   const fileLimit = useSignal<AboLimit | null>(null)
 
@@ -1165,7 +1289,16 @@ function Composer({
             aria-label={texts.chat.writeMessage}
             value={text.value}
             onInput={(e) => {
-              text.value = e.currentTarget.value
+              const el = e.currentTarget
+              const typed = el.value
+              const kept = limitInput(text.value, typed, (t) => textLeft(t, MAX_TEXT_CHARS) >= 0)
+              if (kept !== typed) {
+                // Keep the cursor where it was, minus what did not fit.
+                const caret = Math.max(0, (el.selectionStart ?? typed.length) - (typed.length - kept.length))
+                el.value = kept
+                el.setSelectionRange(caret, caret)
+              }
+              text.value = kept
               saveDraftText(conv, text.value)
               e.currentTarget.style.height = ''
               e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 200)}px`
@@ -1184,8 +1317,7 @@ function Composer({
               }
             }}
           />
-          {tooLong && <span class="field-error">{texts.chat.tooLong}</span>}
-          {tooLong && <AboLimitHint limit="textChars" />}
+          {limitHint && <span class="field-error field-limit">{limitHint}</span>}
         </div>
         <button type="submit" class="send-btn" aria-label={texts.chat.send} disabled={(!text.value.trim() && !drafts.value.length) || tooLong || preparing.value > 0}>
           <Icons.Send />
@@ -1197,7 +1329,27 @@ function Composer({
 
 // --- Introduced contact as a card (like IntroCardBox of the app, ADR 0116) -----------------------------------------
 
-function IntroCardView({ intro, sender, own }: { intro: IntroCard; sender: string; own: boolean }) {
+/** Picture of the introduced person, small and round as a profile picture; a person icon while missing. */
+function IntroPicture({ m, photo }: { m: Msg; photo?: Att }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    setUrl(null)
+    if (photo) attachmentUrl(m, photo, mimeOf(photo.type, photo.name)).then((u) => live && setUrl(u), () => {})
+    return () => {
+      live = false
+    }
+  }, [photo?.id])
+  return url ? (
+    <img class="invite-icon intro-photo" src={url} width={40} height={40} alt="" />
+  ) : (
+    <span class="invite-icon">
+      <Icons.Person size={22} />
+    </span>
+  )
+}
+
+function IntroCardView({ m, intro, photo, sender, own }: { m: Msg; intro: IntroCard; photo?: Att; sender: string; own: boolean }) {
   const [asking, setAsking] = useState(false)
   const [note, setNote] = useState('')
   const state = introState(intro, own, people.value.get(intro.person)?.contact === true, sentRequests.value.some((r) => r.person === intro.person), Date.now())
@@ -1207,9 +1359,7 @@ function IntroCardView({ intro, sender, own }: { intro: IntroCard; sender: strin
   const body = (
     <>
       <span class="invite-top">
-        <span class="invite-icon">
-          <Icons.Person size={22} />
-        </span>
+        <IntroPicture m={m} photo={photo} />
         <span class="invite-texts">
           <span class="invite-sentence">{own ? t.introCardOwn(intro.name) : t.introCardIncoming(sender, intro.name)}</span>
           {(note || status) && <span class="invite-status">{note || status}</span>}
