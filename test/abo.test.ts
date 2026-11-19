@@ -49,11 +49,11 @@ describe('upgradeFor (ADR 0076 §1a)', () => {
     }),
   )!
   it('nennt das günstigste Paket, das mehr erlaubt', () => {
-    expect(upgradeFor(p, 'textChars')).toMatchObject({ plan: { id: 'single' }, value: 5000 })
+    expect(upgradeFor(p, 'attachmentMb')).toMatchObject({ plan: { id: 'single' }, value: 50 })
     expect(upgradeFor(p, 'attachments', 10)).toMatchObject({ plan: { id: 'plus' }, value: 20 })
-    expect(upgradeFor(p, 'textChars', 10000)).toBeNull()
+    expect(upgradeFor(p, 'attachmentMb', 100)).toBeNull()
   })
   it('ohne Limits in der Vorschau kein Hinweis', () => {
-    expect(upgradeFor(parseAbo(JSON.stringify({ plans: [{ id: 'free', monthlyCents: 0, yearlyCents: 0 }] }))!, 'textChars')).toBeNull()
+    expect(upgradeFor(parseAbo(JSON.stringify({ plans: [{ id: 'free', monthlyCents: 0, yearlyCents: 0 }] }))!, 'attachmentMb')).toBeNull()
   })
 })

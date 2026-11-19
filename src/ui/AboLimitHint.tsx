@@ -19,12 +19,7 @@ export function AboLimitHint({ limit }: { limit: AboLimit }) {
   const up = preview && upgradeFor(preview, limit)
   if (!up) return null
   const name = planName(up.plan, german())
-  const text =
-    limit === 'textChars'
-      ? texts.compose.aboLongerText(name, up.value)
-      : limit === 'attachmentMb'
-        ? texts.compose.aboBiggerAttachments(name, up.value)
-        : texts.compose.aboMoreAttachments(name, up.value)
+  const text = limit === 'attachmentMb' ? texts.compose.aboBiggerAttachments(name, up.value) : texts.compose.aboMoreAttachments(name, up.value)
   return (
     <span class="muted small">
       {text}{' '}

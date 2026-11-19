@@ -34,6 +34,10 @@ export const Settings = (p: Props) => (
   </Icon>
 )
 export const Send = (p: Props) => <Icon {...p}><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></Icon>
+/** Play a voice message (AppIcons.Abspielen). */
+export const Play = (p: Props) => <Icon {...p}><path d="M7 4.5L19 12 7 19.5z" /></Icon>
+/** Pause (AppIcons.Anhalten): two bars. */
+export const Pause = (p: Props) => <Icon {...p}><path d="M8 5v14M16 5v14" /></Icon>
 export const Plus = (p: Props) => <Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>
 export const Circle = (p: Props) => (
   <Icon {...p}>

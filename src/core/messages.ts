@@ -238,6 +238,13 @@ export function ownHistoryOf(list: Msg[]): OwnHistoryData[] {
   return out
 }
 
+/**
+ * A line in a direct conversation that is only a note of this device, such as „Isa would like to add Kevin …“ after an
+ * introduction (ADR 0116): only the device that passed the request on has it, so the overview keeps showing the last
+ * real message, the same on every device and in the app.
+ */
+const noteOnly = (m: Msg) => !!m.system && m.conv.startsWith('d:')
+
 /** Last message and number of unread ones per conversation, for the overview. */
 export function summarize(list: Msg[]): Map<ConvKey, { last: Msg; unread: number }> {
   const out = new Map<ConvKey, { last: Msg; unread: number }>()
@@ -245,7 +252,8 @@ export function summarize(list: Msg[]): Map<ConvKey, { last: Msg; unread: number
     const s = out.get(m.conv)
     if (!s) out.set(m.conv, { last: m, unread: m.unread ? 1 : 0 })
     else {
-      if (m.ts >= s.last.ts) s.last = m
+      // A note only stands for the conversation as long as there is nothing else in it.
+      if (noteOnly(s.last) ? !noteOnly(m) || m.ts >= s.last.ts : !noteOnly(m) && m.ts >= s.last.ts) s.last = m
       if (m.unread) s.unread++
     }
   }
@@ -277,6 +285,32 @@ export function listedConversations(
   if (support) direct.delete(support)
   for (const id of direct) out.push(directKey(id))
   return out
+}
+
+/**
+ * A row of the overview for [sortOverview]: [ts] of the last message (0 = none), [since] when the contact was added or
+ * the circle joined or created (0 = unknown).
+ */
+export interface OverviewRow {
+  name: string
+  ts: number
+  since?: number
+  removed?: boolean
+}
+
+/**
+ * Order of „Nachrichten“ as in the app (ChatList.build, ADR 0008): one list by the newest event, the last message or at
+ * least the time the contact was added or the circle joined; then everything without a known time by name; left
+ * circles at the very bottom.
+ */
+export function sortOverview<T extends OverviewRow>(rows: T[]): T[] {
+  const latest = (r: T) => Math.max(r.ts, r.since ?? 0)
+  const byName = (a: T, b: T) => a.name.localeCompare(b.name)
+  const active = rows.filter((r) => !r.removed)
+  const dated = active.filter((r) => latest(r) > 0).sort((a, b) => latest(b) - latest(a) || byName(a, b))
+  const unknown = active.filter((r) => latest(r) === 0).sort(byName)
+  const removed = rows.filter((r) => r.removed).sort((a, b) => b.ts - a.ts || byName(a, b))
+  return [...dated, ...unknown, ...removed]
 }
 
 /** Text including file names, as the search sees it (searchableText in the app). */
@@ -426,4 +460,85 @@ export function quoteOf(original: Msg | null): Quote {
 
 function attachmentKind(type: string): 'photo' | 'voice' | 'document' | 'file' {
   return type === 'jpg' ? 'photo' : type === 'm4a' ? 'voice' : type === 'pdf' ? 'document' : 'file'
+}
+
+/**
+ * Direct conversations still kept under a device ID whose person is known by now, with the key they move to; like the
+ * app, which moves a conversation from the device to the person silently (`renamePeer`, ADR 0042). Without this a
+ * message sent while only the device of a new contact was known stayed in a conversation of its own, named „Someone“.
+ * Conversations with the own person stay where they are.
+ */
+export function peerMoves(keys: Iterable<ConvKey>, personOfDevice: (id: string) => string, own: string | undefined): Map<ConvKey, ConvKey> {
+  const out = new Map<ConvKey, ConvKey>()
+  for (const k of keys) {
+    const { kind, id } = parseKey(k)
+    if (kind !== 'direct') continue
+    const person = personOfDevice(id)
+    if (person && person !== id && person !== own) out.set(k, directKey(person))
+  }
+  return out
+}
+
+/** Title of the browser tab: „(12) anynear“ with new messages, otherwise only „anynear“. */
+export function tabTitle(name: string, unread: number): string {
+  return unread > 0 ? `(${unread}) ${name}` : name
+}
+
+/**
+ * Length of a text as the limit counts it: Unicode code points, so „ä“ counts once and an emoji like 👍 once (not
+ * UTF-8 bytes, not UTF-16 units). Emoji sequences joined from several code points (👨‍👩‍👧, flags, skin tones) count
+ * each of their code points; that keeps a text of 4096 characters at no more than 16384 bytes. The chat counts the
+ * text after `trim()`, like the app.
+ */
+export function textChars(text: string): number {
+  let n = 0
+  for (const _ of text) n++
+  return n
+}
+
+/** Characters still free in a text of at most [max] characters ([textChars] after `trim()`); negative if too long. */
+export function textLeft(text: string, max: number): number {
+  return max - textChars(text.trim())
+}
+
+/** „Noch X Zeichen“ shortly before the limit ([hintBelow] or fewer free), „X Zeichen zu viel“ above it, otherwise `null`. */
+export function charsLeftHint(left: number, hintBelow: number, t: { charsLeft: (n: number) => string; charsTooMany: (n: number) => string }): string | null {
+  if (left < 0) return t.charsTooMany(-left)
+  if (left <= hintBelow) return t.charsLeft(left)
+  return null
+}
+
+const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff
+const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff
+
+/** The first [n] UTF-16 units of [s], one less if that would cut an emoji (surrogate pair) apart. */
+function safePrefix(s: string, n: number): string {
+  return n > 0 && n < s.length && isHigh(s.charCodeAt(n - 1)) ? s.slice(0, n - 1) : s.slice(0, n)
+}
+
+/**
+ * Shortens the change from [old] to [next] so that [fits] holds, like `limitInput` in the app: only the newly inserted
+ * part is shortened (typed or pasted, also in the middle), the rest stays. If [old] itself does not fit any more,
+ * deleting is always allowed. If nothing of the inserted part fits, the field stays as it was.
+ */
+export function limitInput(old: string, next: string, fits: (s: string) => boolean): string {
+  if (fits(next) || next.length <= old.length) return next
+  let start = 0
+  while (start < old.length && old[start] === next[start]) start++
+  let end = 0
+  while (end < old.length - start && old[old.length - 1 - end] === next[next.length - 1 - end]) end++
+  if (start > 0 && isHigh(next.charCodeAt(start - 1))) start--
+  if (end > 0 && isLow(next.charCodeAt(next.length - end))) end--
+  const head = next.slice(0, start)
+  const inserted = next.slice(start, next.length - end)
+  const tail = next.slice(next.length - end)
+  let low = 0
+  let high = inserted.length
+  while (low < high) {
+    const mid = Math.floor((low + high + 1) / 2)
+    if (fits(head + safePrefix(inserted, mid) + tail)) low = mid
+    else high = mid - 1
+  }
+  const kept = safePrefix(inserted, low)
+  return kept ? head + kept + tail : old
 }

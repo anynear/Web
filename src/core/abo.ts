@@ -17,9 +17,11 @@ export interface AboPlan {
   limits?: AboLimits
 }
 
-/** Limits of a message: text in characters, attachment in MB, attachments per message. */
+/**
+ * Limits of a message by plan: attachment in MB, attachments per message. The text limit is the same in every plan
+ * (4096 characters), so a `textChars` of the website is not read.
+ */
 export interface AboLimits {
-  textChars: number
   attachmentMb: number
   attachments: number
 }

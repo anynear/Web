@@ -3,7 +3,7 @@ import { computed, useSignal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
 import type { ImageRef } from 'anmp-core'
 import { texts } from '../i18n'
-import { parseKey, type ConvKey } from '../core/messages'
+import { parseKey, sortOverview, type ConvKey } from '../core/messages'
 import { unread as alertsUnread } from '../core/channels'
 import { acceptRequest, circles, contactRequests, declineRequest, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, requestOrigin, stillLoading, summaries } from '../core/session'
 import { Avatar } from './Avatar'
@@ -11,7 +11,7 @@ import { formatListTime } from './format'
 import * as Icons from './icons'
 import { AlertsNav } from './Alerts'
 import { FilesNav } from './Files'
-import { CirclesNav, NewMessageNav } from './People'
+import { CirclesNav, NewMessageNav, PickSections, pickHits } from './People'
 import { MainHeader } from './MainMenu'
 import { chatSearch, forwarding, newMessage, pane, section } from './nav'
 import { CrashCard } from './CrashReport'
@@ -25,6 +25,9 @@ interface Entry {
   image: ImageRef | null
   preview: string
   ts: number
+  /** When the contact was added or the circle joined or created (ms), 0 = unknown. */
+  since: number
+  removed: boolean
   unread: number
 }
 
@@ -34,13 +37,14 @@ const entries = computed<Entry[]>(() => {
     const { kind, id } = parseKey(key)
     if (kind === 'circle') {
       const c = circles.value.find((x) => x.id === id)
-      return entry(key, c?.name ?? '', 'circle', c?.image ?? null)
+      return entry(key, c?.name ?? '', 'circle', c?.image ?? null, c?.joinedAt ?? 0, c?.removed ?? false)
     }
-    return entry(key, personName(id), 'person', people.value.get(id)?.image ?? null)
+    const p = people.value.get(id)
+    return entry(key, personName(id), 'person', p?.image ?? null, p?.contact ? p.addedAt : 0, false)
   })
-  return list.sort((a, b) => b.ts - a.ts || a.name.localeCompare(b.name))
+  return sortOverview(list)
 
-  function entry(key: ConvKey, name: string, kind: 'circle' | 'person', image: Entry['image']): Entry {
+  function entry(key: ConvKey, name: string, kind: 'circle' | 'person', image: Entry['image'], since: number, removed: boolean): Entry {
     const s = sums.get(key)
     const last = s?.last
     let preview = ''
@@ -51,7 +55,7 @@ const entries = computed<Entry[]>(() => {
     }
     // Messages still coming after the emergency card: „Wird geladen …“ instead of „Noch keine Nachrichten“ (ADR 0107 §8).
     if (!last) preview = stillLoading(key) ? texts.list.loading : texts.chat.noMessagesYet
-    return { key, name, kind, image, preview, ts: last?.ts ?? 0, unread: s?.unread ?? 0 }
+    return { key, name, kind, image, preview, ts: last?.ts ?? 0, since, removed, unread: s?.unread ?? 0 }
   }
 })
 
@@ -65,6 +69,9 @@ export function ConversationList() {
   const q = query.value.trim().toLowerCase()
   // As in the app: search in names and last message.
   const shown = q ? entries.value.filter((e) => e.name.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q)) : entries.value
+  // While searching, also circles and contacts without a conversation yet (ADR 0100 §2), like the app.
+  const more = q ? pickHits(q, new Set(entries.value.map((e) => e.key))) : { circles: [], people: [] }
+  const moreCount = more.circles.length + more.people.length
   const goFiles = () => {
     section.value = 'files'
     if (pane.value === 'settings' || pane.value === 'support') pane.value = 'chat'
@@ -114,8 +121,8 @@ export function ConversationList() {
         <NewMessageNav />
       ) : (
         <>
-          <CrashCard />
-          <RequestCards />
+          {!q && <CrashCard />}
+          {!q && <RequestCards />}
           {/* New device or back from the emergency card: the messages are still coming (ADR 0107 §8). */}
           {(loadingMailbox.value || loadingCircles.value.length > 0) && <p class="hint">{texts.list.messagesLoading}</p>}
           <div class="list-tools">
@@ -126,11 +133,11 @@ export function ConversationList() {
               </button>
             </div>
           </div>
-          {shown.length === 0 && q ? (
+          {shown.length === 0 && moreCount === 0 && q ? (
             <div class="empty">
               <p>{texts.people.noResults}</p>
             </div>
-          ) : shown.length === 0 ? (
+          ) : shown.length === 0 && !q ? (
             <div class="empty">
               <h2>{texts.list.empty}</h2>
               <p>{texts.list.emptyText}</p>
@@ -169,6 +176,11 @@ export function ConversationList() {
                   </button>
                 </li>
               ))}
+              {moreCount > 0 && (
+                <li class="search-more">
+                  <PickSections hits={more} />
+                </li>
+              )}
             </ul>
           )}
         </>
@@ -254,26 +266,54 @@ function attachmentPreview(list: { type: string; name: string }[]): string {
   return `📎 ${a.name || (a.type === 'pdf' ? texts.attachment.pdf : texts.attachment.file)}`
 }
 
-/** Persons asking to become a contact (ADR 0116), as in the app: agree or decline; what they wrote waits until then. */
+/**
+ * Persons asking to become a contact (ADR 0116), as in the app: agree or decline; what they wrote waits until then.
+ * Several requests are one card that unfolds, so that they do not push the chats out of sight.
+ */
 function RequestCards() {
+  const unfolded = useSignal(false)
+  const list = contactRequests.value
   return (
     <>
-      {contactRequests.value.map((r) => (
-        <div key={r.person} class="nav-note crash-card">
+      {list.length > 1 && (
+        <div class="nav-note crash-card">
           <div class="card-pad">
-            <strong>{texts.people.requestTitle(r.name)}</strong>
-            <p class="muted small">{requestOrigin(r)}</p>
+            <strong>{texts.people.requestsTitle(list.length)}</strong>
             <div class="crash-actions">
-              <Button kind="secondary" onClick={() => void acceptRequest(r.person)}>
-                {texts.people.requestAgree}
-              </Button>
-              <Button kind="quiet" onClick={() => void declineRequest(r.person)}>
-                {texts.people.requestDecline}
+              <Button kind={unfolded.value ? 'quiet' : 'secondary'} onClick={() => (unfolded.value = !unfolded.value)}>
+                {unfolded.value ? texts.people.requestsHide : texts.people.requestsShow}
               </Button>
             </div>
           </div>
         </div>
-      ))}
+      )}
+      {(list.length === 1 || unfolded.value) &&
+        list.map((r) => (
+          <div key={r.person} class="nav-note crash-card">
+            <div class="card-pad">
+              <strong>{texts.people.requestTitle(r.name)}</strong>
+              <p class="muted small">{requestOrigin(r)}</p>
+              <div class="crash-actions">
+                <Button
+                  kind="secondary"
+                  onClick={() =>
+                    void acceptRequest(r.person).then((conv) => {
+                      if (!conv) return
+                      pane.value = 'chat'
+                      chatSearch.value = false
+                      open(conv)
+                    })
+                  }
+                >
+                  {texts.people.requestAgree}
+                </Button>
+                <Button kind="quiet" onClick={() => void declineRequest(r.person)}>
+                  {texts.people.requestDecline}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ))}
     </>
   )
 }
