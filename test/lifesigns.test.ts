@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ASK, MAX_QUIET, MIN_QUIET, RUNNING, type LifeSign, askNotice, choices, nextLocalHour, preselect, request } from '../src/core/lifesigns'
+import { ALARM, ASK, MAX_QUIET, MIN_QUIET, REASON_MISSED, RUNNING, type LifeSign, accuracyText, alarmNotice, askNotice, choices, mapLink, nextLocalHour, preselect, request } from '../src/core/lifesigns'
 
 // Check-ins (ADR 0083 §5), like LifeSignsTest in the app: templates and the question „Alles gut?“.
 const MIN = 60_000
@@ -9,7 +9,7 @@ function sign(over: Partial<LifeSign> = {}): LifeSign {
   return {
     id: 'p1', circleId: 'c1', owner: 'me', label: 'Allein arbeiten', start: t0, until: t0 + 8 * 60 * MIN, due: t0 + 20 * MIN,
     lastAt: t0, confirmedAt: t0, state: 1, battery: null, own: true, phase: RUNNING, reason: 0, looking: [], away: [], heard: [],
-    notArriving: false, ...over,
+    notArriving: false, place: null, ...over,
   }
 }
 
@@ -40,6 +40,35 @@ describe('lifesigns', () => {
     expect(askNotice(s, first!.key, s.due + 2 * MIN)?.key).toBe(`ask2:${s.due}`)
     expect(askNotice(sign(), '', s.due)).toBeNull()
     expect(askNotice(sign({ own: false, phase: ASK }), '', s.due)).toBeNull()
+  })
+
+  // ADR 0121 §10, as formatAccuracy in the app: a place never looks more exact than it is.
+  it('rounds the accuracy of a place and links to it on a map', () => {
+    expect(accuracyText(3)).toBe('10 m')
+    expect(accuracyText(12)).toBe('10 m')
+    expect(accuracyText(247)).toBe('250 m')
+    expect(accuracyText(999)).toBe('1000 m')
+    expect(accuracyText(1000)).toBe('1 km')
+    expect(accuracyText(2600)).toBe('3 km')
+    expect(mapLink({ latitude: 50.1106, longitude: 8.6821, at: t0, accuracy: 12 })).toBe(
+      'https://www.openstreetmap.org/?mlat=50.11060&mlon=8.68210#map=16/50.11060/8.68210',
+    )
+    expect(mapLink({ latitude: -33.8568, longitude: -151.2153, at: t0, accuracy: null })).toContain('mlat=-33.85680&mlon=-151.21530')
+  })
+
+  // ADR 0083 §5.7, as LifeSignsTest in the app: a phone that went silent is reported with the place it left at the relays.
+  it('names the place in the alarm, also when the phone is not reachable', () => {
+    const place = { latitude: 50.1106, longitude: 8.6821, at: t0 + 2 * MIN, accuracy: 12 }
+    const silent = sign({ own: false, owner: 'anna', phase: ALARM, reason: 2 }) // 2: nothing came any more (AliveStatus.REASON_UNREACHABLE)
+    const bare = alarmNotice(silent, 'Anna', t0 + 31 * MIN)
+    expect(bare.title).toContain('Anna')
+    const withPlace = alarmNotice({ ...silent, place }, 'Anna', t0 + 31 * MIN)
+    expect(withPlace.title).toBe(bare.title)
+    expect(withPlace.body.startsWith(bare.body)).toBe(true)
+    expect(withPlace.body.length).toBeGreaterThan(bare.body.length)
+    const missed = alarmNotice({ ...silent, reason: REASON_MISSED, place }, 'Anna', t0 + 31 * MIN)
+    expect(missed.title).not.toBe(bare.title)
+    expect(missed.body.endsWith(withPlace.body.slice(bare.body.length))).toBe(true)
   })
 })
 

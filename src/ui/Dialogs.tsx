@@ -1,10 +1,12 @@
-// Create a circle, join a circle (invitation link), add a contact (contact link).
+// Create a circle, join a circle (invitation link), add a contact (contact link), invite someone by text or email.
 import { useSignal } from '@preact/signals'
 import { texts } from '../i18n'
 import { circleKey } from '../core/messages'
 import { circleToJoin } from '../core/invites'
 import { useEffect, useState } from 'preact/hooks'
-import { addContact, createCircle, joinCircle, open, ownContactLink, previewLink } from '../core/session'
+import { isLoginLink, pendingLogin } from '../core/login'
+import { addContact, createCircle, joinCircle, open, ownContactLink, ownName, previewLink } from '../core/session'
+import { contactPicker, mailHref, pickPhoneNumbers, smsHref, smsNumber } from '../core/phoneInvite'
 import { Button, CopyLink, Dialog, Qr, Spinner } from './components'
 import { dialog, dialogLink, pane } from './nav'
 
@@ -22,6 +24,8 @@ export function Dialogs() {
       return <LinkDialog kind="contact" close={close} />
     case 'ownContact':
       return <OwnContact close={close} />
+    case 'inviteContact':
+      return <InviteContact close={close} />
     default:
       return null
   }
@@ -114,6 +118,12 @@ function LinkDialog({ kind, close }: { kind: 'join' | 'contact'; close: () => vo
         class="dialog-body"
         onSubmit={async (e) => {
           e.preventDefault()
+          // A pasted login link (ADR 0122) goes to „Bei … anmelden?“ instead.
+          if (isLoginLink(link.value)) {
+            pendingLogin.value = link.value.trim()
+            close()
+            return
+          }
           busy.value = true
           try {
             const r = join ? await joinCircle(link.value) : await addContact(link.value)
@@ -152,6 +162,12 @@ function LinkDialog({ kind, close }: { kind: 'join' | 'contact'; close: () => vo
           </label>
         )}
         {result.value && <p class={result.value.ok ? 'ok' : 'error'}>{result.value.text}</p>}
+        {!join && (
+          // Like the app's „Aus Telefonkontakten einladen“ in „Kontakt hinzufügen“.
+          <Button kind="secondary" onClick={() => (dialog.value = 'inviteContact')}>
+            {contactPicker() ? texts.people.inviteFromPhone : texts.people.inviteByMessage}
+          </Button>
+        )}
         <div class="dialog-actions">
           <Button kind="quiet" onClick={close}>
             {invite ? texts.circle.dontJoin : texts.common.cancel}
@@ -193,6 +209,91 @@ function OwnContact({ close }: { close: () => void }) {
           <Button kind="quiet" onClick={close}>
             {texts.common.done}
           </Button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
+/** Coarse pointer: a phone or tablet, where sms: links open the messaging app. */
+function canText(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+}
+
+/**
+ * „Aus Telefonkontakten einladen“ like the app (ADR 0003): one sentence on why anynear knows no phone numbers, then the
+ * phone's contact picker (Contact Picker API) and an SMS with the own contact link. Browsers without the picker offer
+ * SMS (phones), email and the share menu. The number only goes into the sms: link.
+ */
+function InviteContact({ close }: { close: () => void }) {
+  const [link, setLink] = useState<string | null | undefined>(undefined)
+  useEffect(() => {
+    ownContactLink().then(setLink, () => setLink(null))
+  }, [])
+  const picker = contactPicker() !== null
+  const text = link ? texts.people.phoneInvite(ownName.value.trim(), link) : ''
+  const share = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  const go = (href: string) => {
+    window.location.href = href
+    close()
+  }
+  return (
+    <Dialog title={picker ? texts.people.inviteFromPhone : texts.people.inviteByMessage} onClose={close}>
+      <div class="dialog-body">
+        <p>
+          <strong>{texts.people.inviteFromPhoneWhy}</strong>
+        </p>
+        {link === undefined ? (
+          <p class="muted">
+            <Spinner /> {texts.people.preparingContact}
+          </p>
+        ) : link === null ? (
+          <p class="error">{texts.common.error}</p>
+        ) : (
+          <>
+            <p>{picker ? texts.people.inviteFromPhoneHow : texts.people.inviteByMessageHow}</p>
+            {!picker && <CopyLink link={link} />}
+          </>
+        )}
+        <div class="dialog-actions">
+          <Button kind="quiet" onClick={close}>
+            {texts.common.cancel}
+          </Button>
+          {link && !picker && (
+            <Button kind="secondary" onClick={() => go(mailHref(texts.people.inviteSubject, text))}>
+              {texts.people.viaMail}
+            </Button>
+          )}
+          {link && !picker && share && (
+            <Button
+              kind="secondary"
+              onClick={() => {
+                navigator.share({ text }).then(close, () => undefined)
+              }}
+            >
+              {texts.people.share}
+            </Button>
+          )}
+          {link && !picker && canText() && (
+            <Button kind="main" onClick={() => go(smsHref(null, text))}>
+              {texts.people.viaSms}
+            </Button>
+          )}
+          {link && picker && (
+            <Button
+              kind="main"
+              onClick={async () => {
+                const phones = await pickPhoneNumbers()
+                if (phones === null) return
+                const number = smsNumber(phones)
+                if (number) go(smsHref(number, text))
+                else if (share) navigator.share({ text }).then(close, () => undefined)
+                else go(mailHref(texts.people.inviteSubject, text))
+              }}
+            >
+              {texts.people.pickPhoneContact}
+            </Button>
+          )}
         </div>
       </div>
     </Dialog>

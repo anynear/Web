@@ -87,6 +87,20 @@ export function Pairing() {
             {texts.pairing.getApp}
           </a>
         </p>
+        {/* Legal pages reachable before pairing too (§ 5 DDG); afterwards under Settings → Legal. */}
+        <p class="muted small">
+          <a href={texts.settings.legalUrls.notice} target="_blank" rel="noopener">
+            {texts.settings.legalNotice}
+          </a>
+          {' · '}
+          <a href={texts.settings.legalUrls.privacy} target="_blank" rel="noopener">
+            {texts.settings.privacy}
+          </a>
+          {' · '}
+          <a href={texts.settings.legalUrls.terms} target="_blank" rel="noopener">
+            {texts.settings.terms}
+          </a>
+        </p>
       </div>
     </main>
   )

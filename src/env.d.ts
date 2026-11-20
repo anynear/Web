@@ -4,3 +4,9 @@
 declare const __APP_VERSION__: string
 /** Build number: number of commits of `main` in this repository, as in the app (ADR 0096 §8); 0 if unknown. */
 declare const __APP_BUILD__: number
+
+/** Emoji of the picker in the input, slimmed down from emojibase-data (vite.config.ts): [emoji, group, name, search words]. */
+declare module 'virtual:emoji-data/*' {
+  const rows: [emoji: string, group: number, label: string, tags: string][]
+  export default rows
+}

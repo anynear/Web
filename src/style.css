@@ -422,8 +422,8 @@ button { font: inherit; color: inherit; }
 .dialog { width: min(480px, calc(100% - 32px)); border: 0; border-radius: 20px; padding: 24px; background: var(--surface); color: var(--text); }
 .dialog::backdrop { background: rgba(6, 10, 18, 0.55); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.dialog-body { display: grid; gap: 16px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 /* View for photos, PDFs and files (Viewer.tsx): large, within the page, closing via X or Escape. */
 .dialog.viewer { width: min(1100px, calc(100% - 32px)); max-height: calc(100% - 32px); }
@@ -513,6 +513,47 @@ mark { background: var(--orange-hell); color: var(--orange-text); border-radius:
 .draft-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
 .icon-btn.small { width: 30px; height: 30px; }
 .attach-btn { flex: none; width: 48px; height: 48px; }
+
+/* --- Emoji picker in the input (web only) --------------------------------------------------------------------- */
+
+.composer { position: relative; }
+/* The button sits inside the field on the right, so that the field keeps its width on the phone. */
+.composer-field { position: relative; }
+.composer-field textarea { padding-right: 50px; }
+.emoji-btn { position: absolute; right: 4px; top: 4px; color: var(--muted); }
+.emoji-btn:hover, .emoji-btn.active { color: var(--text); }
+.emoji-btn.active { background: var(--active); }
+.emoji-picker {
+  position: absolute; bottom: calc(100% + 6px); left: clamp(12px, 4vw, 40px); z-index: 6;
+  display: flex; flex-direction: column; width: min(372px, calc(100% - 24px)); height: min(400px, 60vh);
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 6px 24px rgba(6, 10, 18, 0.18); overflow: hidden;
+}
+.emoji-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; color: var(--muted); }
+.emoji-search .input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 14px; border-radius: 999px; background: var(--field); border-color: transparent; }
+.emoji-tabs { display: flex; gap: 2px; padding: 0 8px 6px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.emoji-tab {
+  flex: 1 1 0; display: inline-grid; place-items: center; min-width: 30px; max-width: 40px; height: 36px; border: 0; border-radius: 10px;
+  background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer;
+}
+.emoji-tab:hover { background: var(--active); }
+/* The current category: orange line as with the selection elsewhere. */
+.emoji-tab.active { background: var(--selected); color: var(--text); box-shadow: inset 0 -2px 0 var(--signalorange); }
+.emoji-grid { flex: 1; overflow-y: auto; padding: 4px 8px 10px; overscroll-behavior: contain; }
+.emoji-heading { position: sticky; top: -4px; margin: 0; padding: 8px 4px 4px; background: var(--surface); color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.emoji-cells { display: grid; grid-template-columns: repeat(8, 1fr); }
+.emoji-cell {
+  aspect-ratio: 1; min-width: 0; border: 0; border-radius: 10px; background: none; cursor: pointer;
+  font-size: 1.5rem; line-height: 1; padding: 0; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+.emoji-cell:hover { background: var(--active); }
+.emoji-cell:focus-visible, .emoji-tab:focus-visible { outline: 3px solid var(--bernstein); outline-offset: -3px; }
+.emoji-picker .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.emoji-note { margin: 24px 8px; color: var(--muted); text-align: center; }
+@media (max-width: 560px) {
+  .emoji-picker { left: 8px; right: 8px; width: auto; height: min(340px, 50vh); }
+  .emoji-cells { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); }
+}
 
 /* --- Sections, storage, passwords, profile ------------------------------------------------------------------- */
 
@@ -812,3 +853,7 @@ tbody tr:last-child .abo-col.selected { box-shadow: inset 2px -2px 0 var(--signa
 /* How the radio is used (Unterwegs / Stationär im WLAN): no picture, no badge. */
 .radio-choice.radio-mode { grid-template-columns: auto 1fr; }
 .radio-choice.unfit:hover { background: none; }
+
+/* Login with anynear (ADR 0122): three big numbers side by side. */
+.login-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.login-choice { min-height: 56px; font-size: 1.4rem; font-weight: 600; }

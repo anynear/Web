@@ -108,6 +108,8 @@ import { browserStorage, clearStorage, local } from './storage'
 import { notificationsOpen, offerGuide } from './guide'
 import { checkUsageStats, startUsageStats } from './usageStats'
 import { onAliveChanged, openLifeSign, startLifeSigns } from './lifesigns'
+import { pendingLogin } from './login'
+import { loginLinkFromUrl } from './loginLink'
 
 export type Phase = 'loading' | 'unsupported' | 'pairing' | 'ready' | 'revoked'
 
@@ -437,6 +439,7 @@ export async function boot() {
   phase.value = isPaired() ? 'ready' : 'pairing'
   if (phase.value === 'ready') afterReady()
   takeChannelLink()
+  takeLoginLink()
   // Online again: pending writes go at once instead of waiting out the delivery plan (ADR 0090).
   window.addEventListener('online', () => core?.networkChanged())
   document.addEventListener('visibilitychange', () => {
@@ -495,6 +498,14 @@ function takeChannelLink() {
   const link = channelLinkFromUrl(location.pathname, location.hash)
   if (!link) return
   pendingLink.value = link
+  history.replaceState(null, '', '/')
+}
+
+/** Login link as deep link (`/l#…`, ADR 0122): remember it for the dialog and take it out of the address bar. */
+function takeLoginLink() {
+  const link = loginLinkFromUrl(location.pathname, location.hash)
+  if (!link) return
+  pendingLogin.value = link
   history.replaceState(null, '', '/')
 }
 
@@ -796,6 +807,7 @@ function onMessage(e: CoreEvent.Message) {
     ...(link ? { link } : {}),
     ...replyOf(e.replyTo, e.replyFrom),
     ...(e.passedOn ? { passedOn: true } : {}),
+    ...(e.spot ? { spot: { kind: e.spot.kind, latitude: e.spot.position?.latitude, longitude: e.spot.position?.longitude, at: e.spot.position ? Number(e.spot.position.at) : undefined, label: e.spot.label ?? undefined, until: e.spot.until != null ? Number(e.spot.until) : undefined } } : {}),
     ...(e.intro ? { intro: { id: e.intro.id, person: e.intro.person, name: e.intro.name, byPerson: e.intro.byPerson, until: Number(e.intro.until), card: e.intro.card } } : {}),
   }
   // Already deleted (the deletion came first): only the line, without notification.

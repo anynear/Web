@@ -5,7 +5,7 @@
 import { batch, signal } from '@preact/signals'
 import type { AliveStatus, AnmpCoreWeb } from 'anmp-core'
 import { texts } from '../i18n'
-import { formatTime } from '../ui/format'
+import { formatDateTime, formatTime } from '../ui/format'
 import { local } from './storage'
 
 // Values as in the core (AliveStatus, AnmpAliveState, AnmpCareState); fixed in the protocol.
@@ -52,6 +52,28 @@ export interface LifeSign {
   away: string[]
   heard: string[]
   notArriving: boolean
+  /** Where the owner's phone was when nobody confirmed, if the person allowed it (ADR 0121 §10); otherwise `null`. */
+  place: LifeSignPlace | null
+}
+
+/** A place in degrees, when the phone located it (ms) and how accurate in metres, if known. */
+export interface LifeSignPlace {
+  latitude: number
+  longitude: number
+  at: number
+  accuracy: number | null
+}
+
+/** „10 m“, „250 m“, „3 km“ (as formatAccuracy in the app): rounded so that it does not look more exact than it is. */
+export function accuracyText(meters: number): string {
+  return meters < 1000 ? texts.location.metres(Math.max(10, Math.floor((meters + 5) / 10) * 10)) : texts.location.kilometres(String(Math.floor((meters + 500) / 1000)))
+}
+
+/** The place on a map. The browser has no maps app, so it is OpenStreetMap; opened only by a button. */
+export function mapLink(p: LifeSignPlace): string {
+  const lat = p.latitude.toFixed(5)
+  const lon = p.longitude.toFixed(5)
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`
 }
 
 export interface Request {
@@ -114,6 +136,24 @@ export function viewOf(s: AliveStatus): LifeSign {
     away: s.away.asJsReadonlyArrayView().slice(),
     heard: p.heard.asJsReadonlyArrayView().map((h) => h.person),
     notArriving: s.notArriving,
+    place: p.position
+      ? { latitude: p.position.latitude, longitude: p.position.longitude, at: Number(p.position.at), accuracy: p.position.accuracy ?? null }
+      : null,
+  }
+}
+
+/**
+ * The alarm for a helper: „nicht bestätigt“ if the phone said so, otherwise „nicht erreichbar“. Both name the place
+ * if one came along: with „nicht bestätigt“ (ADR 0121 §10) or with the alarm the phone left at the relays for the
+ * case that it is switched off or has no network (ADR 0083 §5.7).
+ */
+export function alarmNotice(s: LifeSign, who: string, now: number): { title: string; body: string } {
+  const l = texts.lifeSigns
+  const missed = s.reason === REASON_MISSED
+  const place = s.place ? ` ${l.placeIncluded(formatDateTime(s.place.at, now))}` : ''
+  return {
+    title: missed ? l.missedTitle(who) : l.unreachableTitle(who),
+    body: (missed ? l.missedText : l.unreachableText(formatTime(s.lastAt))) + place,
   }
 }
 
@@ -235,8 +275,8 @@ function notify(s: LifeSign, now: number) {
       show(s.reason === REASON_MISSED ? l.missedTitle(who) : l.hintTitle(who), l.hintText, `hint:${s.due}`)
     }
   } else if (s.phase === ALARM && shown !== `alarm:${s.due}`) {
-    const missed = s.reason === REASON_MISSED
-    show(missed ? l.missedTitle(who) : l.unreachableTitle(who), missed ? l.missedText : l.unreachableText(formatTime(s.lastAt)), `alarm:${s.due}`, true)
+    const n = alarmNotice(s, who, now)
+    show(n.title, n.body, `alarm:${s.due}`, true)
   }
 }
 

@@ -42,9 +42,34 @@ else if (release.test(tag)) version = tag.replace(/^v/, '')
 else if (open && !tags.includes(open)) version = `${open}-pre.${build}`
 else version = `${newestFirst(tags)[0] ?? fallback}+${rev}`
 
+// Emoji picker in the input (web only): names, search words and categories from emojibase-data, bundled
+// locally and slimmed down to what the picker shows. One chunk per language, loaded only when the picker opens.
+// Up to Unicode emoji 15.0, which current systems can show; skin tones and components are left out.
+const EMOJI_DATA = 'virtual:emoji-data/'
+const EMOJI_MAX_VERSION = 15
+function emojiData() {
+  return {
+    name: 'emoji-data',
+    resolveId: (id: string) => (id.startsWith(EMOJI_DATA) ? `\0${id}` : null),
+    load(id: string) {
+      if (!id.startsWith(`\0${EMOJI_DATA}`)) return null
+      const lang = id.slice(EMOJI_DATA.length + 1)
+      if (lang !== 'de' && lang !== 'en') throw new Error(`no emoji data for ${lang}`)
+      type Entry = { emoji: string; label: string; tags?: string[]; group?: number; order?: number; version: number }
+      const all: Entry[] = JSON.parse(readFileSync(new URL(`./node_modules/emojibase-data/${lang}/data.json`, import.meta.url), 'utf8'))
+      const rows = all
+        .filter((e) => e.group !== undefined && e.group !== 2 && e.version <= EMOJI_MAX_VERSION)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map((e) => [e.emoji, e.group, e.label, (e.tags ?? []).join(' ')])
+      return `export default ${JSON.stringify(rows)}`
+    },
+  }
+}
+
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
   plugins: [
+    emojiData(),
     preact(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -73,8 +98,12 @@ export default defineConfig({
         // Web Push (ADR 0060): notice without content and click on the notice.
         importScripts: ['push-sw.js'],
         // Area table for official warnings (about 100 kB): only loaded by those who need it, then from the cache.
-        globIgnores: ['**/regionData-*.js'],
-        runtimeCaching: [{ urlPattern: /\/assets\/regionData-[^/]+\.js$/, handler: 'CacheFirst', options: { cacheName: 'regions', expiration: { maxEntries: 2 } } }],
+        // The same for the emoji names (about 40 kB per language): only once the picker is opened.
+        globIgnores: ['**/regionData-*.js', '**/emoji-data-*.js'],
+        runtimeCaching: [
+          { urlPattern: /\/assets\/regionData-[^/]+\.js$/, handler: 'CacheFirst', options: { cacheName: 'regions', expiration: { maxEntries: 2 } } },
+          { urlPattern: /\/assets\/emoji-data-[^/]+\.js$/, handler: 'CacheFirst', options: { cacheName: 'emoji', expiration: { maxEntries: 2 } } },
+        ],
       },
     }),
   ],
@@ -82,6 +111,11 @@ export default defineConfig({
     // ktor loads `ws` only under Node; in the browser it stays empty.
     alias: { ws: fileURLToPath(new URL('./src/core/ws-stub.ts', import.meta.url)) },
   },
-  build: { target: 'es2022', chunkSizeWarningLimit: 4096 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 4096,
+    // A recognizable name for the emoji data, so that the service worker can leave it out of the precache.
+    rollupOptions: { output: { chunkFileNames: (c) => (c.facadeModuleId?.startsWith(`\0${EMOJI_DATA}`) ? `assets/emoji-data-${c.facadeModuleId.slice(EMOJI_DATA.length + 1)}-[hash].js` : 'assets/[name]-[hash].js') } },
+  },
   test: { environment: 'node' },
 })

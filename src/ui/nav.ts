@@ -5,7 +5,7 @@ import { isRadioPath } from '../core/radioSetup'
 
 export type Section = 'messages' | 'circles' | 'files' | 'alerts'
 export type Pane = 'chat' | 'details' | 'settings' | 'support' | 'radio'
-export type DialogKind = 'startCircle' | 'joinCircle' | 'addContact' | 'createChannel' | 'joinChannel' | 'ownContact' | 'startLifeSign' | null
+export type DialogKind = 'startCircle' | 'joinCircle' | 'addContact' | 'inviteContact' | 'createChannel' | 'joinChannel' | 'ownContact' | 'startLifeSign' | null
 
 /** Section of the sidebar: messages, circles (ADR 0100), storage (with passwords) or alerts, like the tabs of the app. */
 export const section = signal<Section>('messages')
