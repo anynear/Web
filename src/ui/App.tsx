@@ -10,6 +10,7 @@ import { Button, Spinner } from './components'
 import { ConversationList } from './ConversationList'
 import { Details } from './Details'
 import { Dialogs } from './Dialogs'
+import { LoginDialog } from './Login'
 import { Viewer } from './Viewer'
 import { FilesPage, FilesSearchPage } from './Files'
 import { alertSel, filesQuery, filesSel, forwarding, pane, section, supportKind } from './nav'
@@ -146,6 +147,7 @@ function Main() {
       </main>
       <Dialogs />
       <AlertsDialogs />
+      <LoginDialog />
       <LifeSignFullScreen />
       <Viewer />
     </div>

@@ -16,6 +16,7 @@ import {
   type LifeSign,
   type Loudness,
   type Template,
+  accuracyText,
   care,
   choices,
   confirm,
@@ -24,6 +25,7 @@ import {
   helpers,
   lifeSigns,
   loudness,
+  mapLink,
   meAway,
   nameOf,
   openSection,
@@ -115,6 +117,20 @@ function WatchedCard({ s }: { s: LifeSign }) {
       <span class="alert-text">{text}</span>
       {away && <span class="alert-text">{l.awayActive}</span>}
       {s.looking.length > 0 && <span class="alert-text">{l.lookingBy(s.looking.map(nameOf).join(', '))}</span>}
+      {/* The place that came with „nicht bestätigt“ (ADR 0121 §10) or with the alarm the relays released for a phone
+          that went silent (ADR 0083 §5.7), with its time and how accurate it is. */}
+      {s.place && (
+        <span class="alert-text">
+          <strong>
+            {[l.placeFrom(formatDateTime(s.place.at)), s.place.accuracy != null ? l.placeAccuracy(accuracyText(s.place.accuracy)) : ''].filter(Boolean).join(', ')}
+          </strong>
+        </span>
+      )}
+      {s.place && (
+        <a class="btn btn-secondary alert-open" href={mapLink(s.place)} target="_blank" rel="noopener noreferrer">
+          {l.showOnMap}
+        </a>
+      )}
       <span class="alert-actions">
         {s.phase === HINT || s.phase === ALARM ? (
           <Button kind="main" onClick={() => void care(s.id, LOOKING)}>

@@ -12,4 +12,8 @@ describe('CSP in index.html', () => {
     expect(directive('default-src')).toEqual(["'self'"])
     expect(directive('script-src')).toEqual(["'self'"])
   })
+
+  it('lets the core reach the issuer of „Mit anynear anmelden“ (ADR 0122)', () => {
+    expect(directive('connect-src')).toContain('https://id.anynear.app')
+  })
 })

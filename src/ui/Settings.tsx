@@ -262,10 +262,31 @@ export function Settings() {
             </Button>
           </div>
         </Section>
-        <p id="about" class="muted small center">{texts.settings.version(__APP_VERSION__, __APP_BUILD__)}</p>
+        <Section id="about" title={texts.settings.about}>
+          <Row icon={<Icons.Circle />} title="anynear" text={texts.settings.version(__APP_VERSION__, __APP_BUILD__)} />
+          {/* License as in the app (LICENSE, TRADEMARKS.md), with the required source of the region data (NOTICE). */}
+          <details class="card-pad more">
+            <summary>
+              {texts.settings.license} · {texts.settings.licenseShort}
+            </summary>
+            <p class="small">{texts.settings.licenseText}</p>
+            <p class="muted small">{texts.alerts.regionSource}</p>
+          </details>
+        </Section>
+
+        <Section title={texts.settings.legal} footer={texts.settings.legalFooter}>
+          <Row icon={<Icons.Help />} title={texts.settings.legalNotice} onClick={() => openPage(texts.settings.legalUrls.notice)} />
+          <Row icon={<Icons.Lock />} title={texts.settings.privacy} onClick={() => openPage(texts.settings.legalUrls.privacy)} />
+          <Row icon={<Icons.File />} title={texts.settings.terms} onClick={() => openPage(texts.settings.legalUrls.terms)} />
+        </Section>
       </div>
     </section>
   )
+}
+
+/** A page of the website in a new tab: the web app stays open. */
+function openPage(url: string) {
+  window.open(url, '_blank', 'noopener')
 }
 
 /** Only on the support identity: contact link for publishing with authorisation for one year (ADR 0084 §6). */

@@ -67,6 +67,11 @@ export interface Msg {
   replyFrom?: string
   /** The sender passed on a message it got („Weitergeleitet“, ADR 0118); no origin. */
   passedOn?: boolean
+  /**
+   * A place in the conversation (ADR 0121 §8): kind 1 meeting point, 2 „Wo bist du?“ (no place), 3 the sender's
+   * place, 4 the invitation to share in the circle until [until] (ms); [text] is only the stand-in for older apps.
+   */
+  spot?: { kind: number; latitude?: number; longitude?: number; at?: number; label?: string; until?: number }
   /** Contact introduced in this message (ADR 0116); [text] is only the stand-in for older apps. */
   intro?: IntroCard
 }

@@ -9,6 +9,7 @@ import type { AboLimit } from '../core/abo'
 import { addToDraft, draftFiles, draftPassedOn, draftText, incomingDrafts, saveDraftFiles, saveDraftPassedOn, saveDraftText, takeIncoming } from '../core/drafts'
 import { findInviteLinks, withoutInviteLinks, type InviteLink } from '../core/invites'
 import { introState, introStatus } from '../core/requests'
+import { mapLink } from '../core/lifesigns'
 import { channels, openRequest, pendingLink } from '../core/channels'
 import {
   type Att,
@@ -66,6 +67,7 @@ import * as Icons from './icons'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
 import { FileActionDialog, type FileAction, type FileItem } from './FileActions'
+import { insertEmoji } from './emoji'
 import { chatSearch, dialog, dialogLink, forwarding, pane, section, supportKind } from './nav'
 
 /** For selection as in the app (Reaction.CHOICES). */
@@ -414,7 +416,7 @@ function Bubble({
   const reactions = reactionSummary(m)
   const invites = m.text ? findInviteLinks(m.text) : []
   // With an introduction (ADR 0116) the card says it all; the text is only the stand-in for older apps.
-  const text = m.intro ? '' : invites.length ? withoutInviteLinks(m.text, invites) : m.text
+  const text = m.intro || m.spot ? '' : invites.length ? withoutInviteLinks(m.text, invites) : m.text
   // Its picture goes along as a photo (ADR 0116 §2); the card shows it small as the profile picture instead.
   const introPhoto = m.intro ? m.attachments.find((a) => a.type === 'jpg') : undefined
   const attachments = introPhoto ? m.attachments.filter((a) => a !== introPhoto) : m.attachments
@@ -455,6 +457,7 @@ function Bubble({
         {showName && <div class="bubble-name">{personName(m.fromPerson, m.fromName)}</div>}
         {m.passedOn && <PassedOnLabel />}
         {m.replyTo && <QuoteBox m={m} onOpen={onQuote} />}
+        {m.spot && <SpotCard m={m} />}
         {attachments.map((a) => (
           <Attachment key={a.id} m={m} a={a} />
         ))}
@@ -671,6 +674,27 @@ function QuoteBox({ m, onOpen }: { m: Msg; onOpen: () => void }) {
 
 /** Above the input while answering: to whom, one line of the original, ✕ to cancel. */
 /** „Weitergeleitet“ with an arrow (ADR 0118): above a passed on message and above the input of such a draft. */
+/** A place in a message (ADR 0121 §8): meeting point, „Wo bist du?“ or someone's place; the map opens only on a tap. */
+function SpotCard({ m }: { m: Msg }) {
+  const s = m.spot!
+  const t = texts.lifeSigns
+  const title = s.kind === 1 ? (s.label ? t.spotMeetNamed(s.label) : t.spotMeet) : s.kind === 2 ? t.spotAsk : s.kind === 4 ? t.spotAll : t.spotHere
+  const place = s.latitude != null && s.longitude != null
+  return (
+    <div class="bubble-text">
+      <strong>{title}</strong>
+      {place && (
+        <div>
+          <a class="btn btn-secondary alert-open" href={mapLink({ latitude: s.latitude!, longitude: s.longitude!, at: s.at ?? 0, accuracy: null })} target="_blank" rel="noopener noreferrer">
+            {t.showOnMap}
+          </a>
+        </div>
+      )}
+      {(s.kind === 2 || s.kind === 4) && !m.outgoing && <div>{t.spotAskHint}</div>}
+    </div>
+  )
+}
+
 function PassedOnLabel() {
   return (
     <div class="passed-on">
@@ -1067,6 +1091,10 @@ function Composer({
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const camera = useRef<HTMLInputElement>(null)
+  const emojiBtn = useRef<HTMLButtonElement>(null)
+  // Emoji picker (web only): the component and the names are loaded only when it is opened the first time.
+  const [Picker, setPicker] = useState<EmojiPickerType | null>(null)
+  const emojiOpen = useSignal(false)
   const writable = canWrite(conv)
   // As in the app (TextLimit, TEXT_HINT_BELOW): input stops at the limit, a hint shortly before it.
   const left = textLeft(text.value, MAX_TEXT_CHARS)
@@ -1081,6 +1109,7 @@ function Composer({
     drafts.value = draftFiles<Draft>(conv)
     passedOn.value = draftPassedOn(conv)
     problem.value = ''
+    emojiOpen.value = false
     const a = area.current
     if (a) {
       a.style.height = ''
@@ -1173,6 +1202,37 @@ function Composer({
         preparing.value--
       }
     }
+  }
+
+  function toggleEmoji() {
+    if (emojiOpen.value) return closeEmoji(true)
+    emojiOpen.value = true
+    if (!Picker) void loadEmojiPicker().then((c) => setPicker(() => c), () => (emojiOpen.value = false))
+  }
+
+  /** Closes the picker; after Escape or the button the focus goes back to the button, as with any popup. */
+  function closeEmoji(toButton: boolean) {
+    emojiOpen.value = false
+    if (toButton) emojiBtn.current?.focus()
+  }
+
+  /** The emoji goes in at the cursor (in place of a selection), whole or not at all, and the cursor stays behind it. */
+  function pickEmoji(emoji: string): boolean {
+    const el = area.current
+    const start = el?.selectionStart ?? text.value.length
+    const end = el?.selectionEnd ?? start
+    const done = insertEmoji(text.value, start, end, emoji, MAX_TEXT_CHARS)
+    emojiOpen.value = false
+    if (!el) return false
+    el.focus()
+    if (!done) return false
+    text.value = done.text
+    el.value = done.text
+    el.setSelectionRange(done.caret, done.caret)
+    saveDraftText(conv, done.text)
+    el.style.height = ''
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    return true
   }
 
   function submit() {
@@ -1317,8 +1377,23 @@ function Composer({
               }
             }}
           />
+          <button
+            ref={emojiBtn}
+            type="button"
+            class={`icon-btn emoji-btn ${emojiOpen.value ? 'active' : ''}`}
+            aria-label={texts.emoji.open}
+            title={texts.emoji.open}
+            aria-haspopup="dialog"
+            aria-expanded={emojiOpen.value}
+            // On a computer the input keeps its focus; on the phone the keyboard goes away for the picker.
+            onMouseDown={(e) => !touchDevice && e.preventDefault()}
+            onClick={toggleEmoji}
+          >
+            <Icons.Smile size={20} />
+          </button>
           {limitHint && <span class="field-error field-limit">{limitHint}</span>}
         </div>
+        {emojiOpen.value && Picker && <Picker onPick={pickEmoji} onClose={closeEmoji} focusSearch={!touchDevice} />}
         <button type="submit" class="send-btn" aria-label={texts.chat.send} disabled={(!text.value.trim() && !drafts.value.length) || tooLong || preparing.value > 0}>
           <Icons.Send />
         </button>
@@ -1398,6 +1473,9 @@ function IntroCardView({ m, intro, photo, sender, own }: { m: Msg; intro: IntroC
 // --- Invitations as a card (like InviteCardBox of the app) --------------------------------------------------------
 
 /** Phone or tablet (finger instead of mouse): there `capture` opens the camera. */
+type EmojiPickerType = typeof import('./EmojiPicker').default
+const loadEmojiPicker = () => import('./EmojiPicker').then((m) => m.default)
+
 const touchDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 
 /**
