@@ -9,7 +9,6 @@ import type { AboLimit } from '../core/abo'
 import { addToDraft, draftFiles, draftPassedOn, draftText, incomingDrafts, saveDraftFiles, saveDraftPassedOn, saveDraftText, takeIncoming } from '../core/drafts'
 import { findInviteLinks, withoutInviteLinks, type InviteLink } from '../core/invites'
 import { introState, introStatus } from '../core/requests'
-import { mapLink } from '../core/lifesigns'
 import { channels, openRequest, pendingLink } from '../core/channels'
 import {
   type Att,
@@ -64,6 +63,7 @@ import { Avatar } from './Avatar'
 import { Button, Confirm, CopyLink, Dialog, Qr } from './components'
 import { formatDay, formatListTime, formatSize, formatTime, formatVoiceDuration, isSameDay, splitLinks } from './format'
 import * as Icons from './icons'
+import { MutualPlaceDialog, SpotEvent, canShareWith } from './Place'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
 import { FileActionDialog, type FileAction, type FileItem } from './FileActions'
@@ -210,6 +210,11 @@ export function Chat({ conv }: { conv: ConvKey }) {
                     <div class="system">{m.text}</div>
                   ) : m.deleted ? (
                     <DeletedLine m={m} highlighted={highlight === m.id} flash={flash === m.id} />
+                  ) : m.spot ? (
+                    // What the app sends for the person is a card in the middle, not a bubble (ADR 0121 §26).
+                    <div id={`m-${m.id}`} class={`spot-row ${highlight === m.id ? 'highlight' : ''}`}>
+                      <SpotEvent m={m} />
+                    </div>
                   ) : (
                     <Bubble m={m} inCircle={kind === 'circle'} showName={kind === 'circle' && !m.outgoing && !sameAuthor} highlighted={highlight === m.id}
                       flash={flash === m.id}
@@ -457,7 +462,6 @@ function Bubble({
         {showName && <div class="bubble-name">{personName(m.fromPerson, m.fromName)}</div>}
         {m.passedOn && <PassedOnLabel />}
         {m.replyTo && <QuoteBox m={m} onOpen={onQuote} />}
-        {m.spot && <SpotCard m={m} />}
         {attachments.map((a) => (
           <Attachment key={a.id} m={m} a={a} />
         ))}
@@ -674,27 +678,6 @@ function QuoteBox({ m, onOpen }: { m: Msg; onOpen: () => void }) {
 
 /** Above the input while answering: to whom, one line of the original, ✕ to cancel. */
 /** „Weitergeleitet“ with an arrow (ADR 0118): above a passed on message and above the input of such a draft. */
-/** A place in a message (ADR 0121 §8): meeting point, „Wo bist du?“ or someone's place; the map opens only on a tap. */
-function SpotCard({ m }: { m: Msg }) {
-  const s = m.spot!
-  const t = texts.lifeSigns
-  const title = s.kind === 1 ? (s.label ? t.spotMeetNamed(s.label) : t.spotMeet) : s.kind === 2 ? t.spotAsk : s.kind === 4 ? t.spotAll : t.spotHere
-  const place = s.latitude != null && s.longitude != null
-  return (
-    <div class="bubble-text">
-      <strong>{title}</strong>
-      {place && (
-        <div>
-          <a class="btn btn-secondary alert-open" href={mapLink({ latitude: s.latitude!, longitude: s.longitude!, at: s.at ?? 0, accuracy: null })} target="_blank" rel="noopener noreferrer">
-            {t.showOnMap}
-          </a>
-        </div>
-      )}
-      {(s.kind === 2 || s.kind === 4) && !m.outgoing && <div>{t.spotAskHint}</div>}
-    </div>
-  )
-}
-
 function PassedOnLabel() {
   return (
     <div class="passed-on">
@@ -1096,6 +1079,8 @@ function Composer({
   const [Picker, setPicker] = useState<EmojiPickerType | null>(null)
   const emojiOpen = useSignal(false)
   const writable = canWrite(conv)
+  const mutualOpen = useSignal(false)
+  const mutualWith = parseKey(conv).kind === 'direct' && canShareWith(parseKey(conv).id) ? parseKey(conv).id : null
   // As in the app (TextLimit, TEXT_HINT_BELOW): input stops at the limit, a hint shortly before it.
   const left = textLeft(text.value, MAX_TEXT_CHARS)
   const tooLong = left < 0
@@ -1279,6 +1264,7 @@ function Composer({
         if (e.dataTransfer?.files.length) void addFiles(e.dataTransfer.files)
       }}
     >
+      {mutualOpen.value && mutualWith && <MutualPlaceDialog personId={mutualWith} onClose={() => (mutualOpen.value = false)} />}
       {passedOn.value && <PassedOnLabel />}
       {reply && <ReplyBar m={reply} onCancel={onCancelReply} />}
       {(drafts.value.length > 0 || preparing.value > 0 || problem.value) && (
@@ -1320,6 +1306,12 @@ function Composer({
         <button type="button" class="icon-btn attach-btn" aria-label={texts.compose.attach} title={texts.compose.attach} onClick={() => picker.current?.click()}>
           <Icons.Paperclip />
         </button>
+        {/* „Standort gegenseitig teilen“ in a chat with one person (ADR 0121 §28); the app has it in the „+“. */}
+        {mutualWith && (
+          <button type="button" class="icon-btn attach-btn" aria-label={texts.place.mutualStart} title={texts.place.mutualStart} onClick={() => (mutualOpen.value = true)}>
+            <Icons.Map />
+          </button>
+        )}
         {/* Take a photo directly as in the app; only on phones and tablets, on a computer `capture` opens no camera. */}
         {touchDevice && (
           <>

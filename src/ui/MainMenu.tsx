@@ -44,7 +44,18 @@ function contextActions(): MenuAction[] {
       ]
     case 'circles':
       // Invitations mostly arrive as a link that opens anynear by itself (ADR 0101).
-      return [{ label: texts.people.acceptInvite, icon: <Icons.Link size={20} />, action: () => (dialog.value = 'joinCircle') }]
+      return [
+        { label: texts.people.acceptInvite, icon: <Icons.Link size={20} />, action: () => (dialog.value = 'joinCircle') },
+        // Who sees the own location (ADR 0121 §27); in the app it sits on the map, which the browser does not have.
+        {
+          label: texts.place.whoSeesMe,
+          icon: <Icons.Map size={20} />,
+          action: () => {
+            openSettings(null)
+            pane.value = 'whoSeesMe'
+          },
+        },
+      ]
     default:
       return []
   }
