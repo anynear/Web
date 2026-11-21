@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY, KEYS, Sharing, decodeSetting, encodeSetting, levelFor, takeSettings, type LocalStore } from '../src/core/sharing'
+import { EMPTY, KEYS, Sharing, betweenOf, decodeSetting, encodeSetting, levelFor, takeSettings, type LocalStore } from '../src/core/sharing'
+import { de } from '../src/i18n/de'
+import { en } from '../src/i18n/en'
 
 function memory(): LocalStore & { map: Map<string, string> } {
   const map = new Map<string, string>()
@@ -126,5 +128,50 @@ describe('Standort gegenseitig teilen (ADR 0121 §28)', () => {
     expect(lowered).toEqual([])
     // Without an agreement nothing changes.
     expect(s.remoteLowered('p2', 0)).toBe(false)
+  })
+
+  // The reported bug: both share precisely already, set up outside „Standort freigeben“; a second tap shows that.
+  it('„Standort freigeben“ erkennt eine bestehende Freigabe und fragt nicht neu', () => {
+    const { s } = setup()
+    s.setPerson('anna', 'exact')
+    const b = s.between('anna', [], 'exact', 0)
+    expect(b.exists).toBe(true)
+    expect(b.both).toBe('exact')
+    expect(b.askable).toEqual([])
+    expect(b.suggested).toBeNull()
+  })
+
+  it('auch eine Freigabe über den Kreis zählt; gefragt wird nur nach mehr', () => {
+    const b = betweenOf('exact', 'area', null, false)
+    expect(b.both).toBe('area')
+    expect(b.askable).toEqual(['exact'])
+    expect(b.suggested).toBe('exact')
+  })
+
+  it('offene Anfrage und Absprache werden gezeigt, ohne Freigabe ist es eine neue Frage', () => {
+    const { s } = setup()
+    s.askMutual('tom', 'exact')
+    const tom = s.between('tom', [], null, 0)
+    expect(tom.open && tom.exists).toBe(true)
+    expect(tom.suggested).toBe('exact')
+    s.agreeMutual('ben', 'area')
+    expect(s.between('ben', [], null, 0).agreed).toBe('area')
+    const eva = s.between('eva', [], null, 0)
+    expect(eva.exists).toBe(false)
+    expect(eva.askable).toEqual(['area', 'exact'])
+    expect(eva.suggested).toBe('area')
+  })
+
+  it('heißt in beiden Sprachen „Standort freigeben“', () => {
+    expect(de.place.mutualStart).toBe('Standort freigeben')
+    expect(en.place.mutualStart).toBe('Share location')
+    expect(de.place.mutualAnswerNotice.startsWith('Standort freigeben')).toBe(true)
+    expect(en.place.mutualAnswerNotice.startsWith('Share location')).toBe(true)
+    expect(de.place.mutualTitle('Anna')).toBe('Standort für Anna freigeben')
+    for (const t of [de, en]) {
+      for (const text of [t.place.mutualStart, t.place.mutualAnswerNotice, t.place.mutualTitle('Anna')]) {
+        expect(text).not.toMatch(/gegenseitig teilen|with each other/)
+      }
+    }
   })
 })

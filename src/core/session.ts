@@ -1704,7 +1704,7 @@ export function imageUrl(ref: ImageRef): Promise<string | null> {
   return p
 }
 
-// --- Who sees me, sharing with each other (ADR 0121 §27–§29) -------------------------------------------------
+// --- Who sees me, „Standort freigeben“ (ADR 0121 §27–§29) -------------------------------------------------
 
 /** The levels as the person set them, on every own device. */
 export const sharingState = signal<SharingState>(NO_SHARING)
@@ -1768,7 +1768,17 @@ async function sendSpot(personId: string, text: string, kind: number, level: num
   return !!sent
 }
 
-/** „Standort gegenseitig teilen“: the own place is shown at [level] from now on, and the person is asked for the same. */
+/**
+ * What [personId] shows of its place to us now (ADR 0121 §3), as the core last heard it; `null` if nothing or the
+ * level is over. For „Standort freigeben“, so that a sharing the other side set up is recognized.
+ */
+export function theirLevel(personId: string): Level | null {
+  const now = Date.now()
+  const p = core?.places().find((x) => x.person === personId && (Number(x.until) === 0 || Number(x.until) > now))
+  return p ? levelOfWire(p.level) : null
+}
+
+/** „Standort freigeben“: the own place is shown at [level] from now on, and the person is asked for the same. */
 export async function askMutualPlace(personId: string, level: Level): Promise<boolean> {
   const sent = await sendSpot(personId, texts.place.mutualMessage, SPOT.SHARE, level === 'exact' ? 3 : 2)
   if (sent) sharing.askMutual(personId, level)
