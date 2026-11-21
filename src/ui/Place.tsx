@@ -1,5 +1,5 @@
 // Places as in the app (ADR 0121 §24–§29): „Wer sieht mich?“ in three steps, the cards in the chat for places
-// (SpotCard, MutualPlaceCard of the app), „Standort gegenseitig teilen“, and the questions to be an SOS contact
+// (SpotCard, MutualPlaceCard of the app), „Standort freigeben“, and the questions to be an SOS contact
 // (SosUi of the app). The browser sends no place of its own; the phone does that (ADR 0121, Folgen).
 import { useState } from 'preact/hooks'
 import { texts } from '../i18n'
@@ -14,6 +14,7 @@ import {
   personName,
   sharing,
   sharingState,
+  theirLevel,
   type Person,
 } from '../core/session'
 import { mapLink } from '../core/lifesigns'
@@ -243,51 +244,85 @@ export function WhoSeesMeRow() {
   )
 }
 
-// --- Standort gegenseitig teilen (ADR 0121 §28) ------------------------------------------------------------------
+// --- Standort freigeben (ADR 0121 §28) ----------------------------------------------------------------------------
 
-/** Choose the level; the own place is shown at it from then on, and the person is asked for the same. */
+/**
+ * First what the person and the other already show each other, also when it was set up elsewhere (a circle, „Wer
+ * sieht mich?“, the phone); then, if there is more to ask for, the level. The own place is shown at it from then on.
+ */
 export function MutualPlaceDialog({ personId, onClose }: { personId: string; onClose: () => void }) {
   const t = texts.place
-  const [level, setLevel] = useState<Level>('area')
+  const name = personName(personId)
+  // Reading the signal keeps the state current after a change on another own device.
+  sharingState.value
+  const inCircles = people.value.get(personId)?.circles.filter((c) => shownCircles().some((x) => x.id === c)) ?? []
+  const b = sharing.between(personId, inCircles, theirLevel(personId), Date.now())
+  const [level, setLevel] = useState<Level>(b.suggested ?? 'area')
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   return (
-    <Dialog title={t.mutualTitle(personName(personId))} onClose={onClose}>
+    <Dialog title={t.mutualTitle(name)} onClose={onClose}>
       <div class="dialog-body">
-        <p>{t.mutualText}</p>
+        {b.exists && (
+          <>
+            {b.both && (
+              <p>
+                <strong>{t.mutualBoth(name, b.both === 'exact')}</strong>
+              </p>
+            )}
+            <p>
+              {t.mutualMine(name, levelName(b.mine))}
+              <br />
+              {t.mutualTheirs(name, levelName(b.theirs))}
+            </p>
+            {b.open && <p class="muted small">{t.mutualWaiting(name)}</p>}
+            <p class="muted small">{t.mutualChange}</p>
+          </>
+        )}
+        {b.askable.length > 0 && <p>{b.exists ? t.mutualMore : t.mutualText}</p>}
         {(
           [
             ['area', t.mutualArea, t.mutualAreaText],
             ['exact', t.mutualExact, t.mutualExactText],
           ] as const
-        ).map(([l, title, text]) => (
-          <label key={l} class="radio-row">
-            <input type="radio" name="mutual" checked={level === l} onChange={() => setLevel(l)} />
-            <span>
-              <strong>{title}</strong>
-              <br />
-              <span class="muted small">{text}</span>
-            </span>
-          </label>
-        ))}
+        )
+          .filter(([l]) => b.askable.includes(l))
+          .map(([l, title, text]) => (
+            <label key={l} class="radio-row">
+              <input type="radio" name="mutual" checked={level === l} onChange={() => setLevel(l)} />
+              <span>
+                <strong>{title}</strong>
+                <br />
+                <span class="muted small">{text}</span>
+              </span>
+            </label>
+          ))}
         {failed && <p class="field-error">{t.sendFailed}</p>}
         <div class="dialog-actions">
-          <Button kind="quiet" onClick={onClose}>
-            {texts.common.cancel}
-          </Button>
-          <Button
-            kind="primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              const ok = await askMutualPlace(personId, level)
-              setBusy(false)
-              if (ok) onClose()
-              else setFailed(true)
-            }}
-          >
-            {t.mutualSend}
-          </Button>
+          {b.askable.length === 0 ? (
+            <Button kind="primary" onClick={onClose}>
+              {texts.common.done}
+            </Button>
+          ) : (
+            <>
+              <Button kind="quiet" onClick={onClose}>
+                {texts.common.cancel}
+              </Button>
+              <Button
+                kind="primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  const ok = await askMutualPlace(personId, b.askable.includes(level) ? level : (b.suggested ?? level))
+                  setBusy(false)
+                  if (ok) onClose()
+                  else setFailed(true)
+                }}
+              >
+                {t.mutualSend}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </Dialog>

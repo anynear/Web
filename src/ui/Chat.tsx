@@ -1306,7 +1306,7 @@ function Composer({
         <button type="button" class="icon-btn attach-btn" aria-label={texts.compose.attach} title={texts.compose.attach} onClick={() => picker.current?.click()}>
           <Icons.Paperclip />
         </button>
-        {/* „Standort gegenseitig teilen“ in a chat with one person (ADR 0121 §28); the app has it in the „+“. */}
+        {/* „Standort freigeben“ in a chat with one person (ADR 0121 §28); the app has it in the „+“. */}
         {mutualWith && (
           <button type="button" class="icon-btn attach-btn" aria-label={texts.place.mutualStart} title={texts.place.mutualStart} onClick={() => (mutualOpen.value = true)}>
             <Icons.Map />

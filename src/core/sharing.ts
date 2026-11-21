@@ -153,6 +153,33 @@ export function levelFor(s: SharingState, personId: string, circleIds: string[],
   return always(most) && !s.approved.includes(personId) ? 'when' : most
 }
 
+/**
+ * Where the person and someone else stand with each other, for „Standort freigeben“ (ADR 0121 §28), as `Between` in
+ * the app: [mine] what the person shows, [theirs] what the other shows back, [agreed] what both agreed on, [open]
+ * while the own question has no answer yet.
+ */
+export interface Between {
+  mine: Level
+  theirs: Level
+  agreed: Level | null
+  open: boolean
+  /** Something is shared all the time in either direction, agreed on or asked for: there is a sharing to show. */
+  exists: boolean
+  /** The level both show each other all the time, the lower of the two; `null` if one of them does not. */
+  both: Level | null
+  /** The levels it still makes sense to ask for: those above what both show already. Empty: nothing more to ask. */
+  askable: Level[]
+  /** The level to start the choice at: never below what the person shows already, so asking does not lower it. */
+  suggested: Level | null
+}
+
+export function betweenOf(mine: Level, theirs: Level, agreed: Level | null, open: boolean): Between {
+  const both = always(mine) && always(theirs) ? (wireOf(mine) <= wireOf(theirs) ? mine : theirs) : null
+  const askable = (['area', 'exact'] as Level[]).filter((l) => wireOf(l) > wireOf(both ?? 'off'))
+  const suggested = askable.find((l) => wireOf(l) >= wireOf(mine)) ?? askable[askable.length - 1] ?? null
+  return { mine, theirs, agreed, open, exists: always(mine) || always(theirs) || agreed != null || open, both, askable, suggested }
+}
+
 /** Where the settings go: the profile space through the core. */
 export interface SharingStore {
   write(name: string, value: string): void
@@ -279,7 +306,15 @@ export class Sharing {
     if (this.local.get(MUTUAL + personId) == null) this.local.set(MUTUAL + personId, this.state.persons[personId] ?? NONE)
   }
 
-  /** „Standort gegenseitig teilen“: the person shows [personId] its place at [level] from now on and asks for the same. */
+  /**
+   * Where the person and [personId] stand with each other (see [Between]): what it shows through [circleIds] or its
+   * own setting, what [theirs] shows back, and what this browser knows of an agreement or an open question.
+   */
+  between(personId: string, circleIds: string[], theirs: Level | null, now: number): Between {
+    return betweenOf(levelFor(this.state, personId, circleIds, now), theirs ?? 'off', this.agreed(personId), this.mutualOpen(personId))
+  }
+
+  /** „Standort freigeben“: the person shows [personId] its place at [level] from now on and asks for the same. */
   askMutual(personId: string, level: Level) {
     this.rememberBefore(personId)
     this.local.set(OPEN + personId, '1')
