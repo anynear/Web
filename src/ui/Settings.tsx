@@ -29,6 +29,7 @@ import { installPrompt } from './install'
 import { pane, settingsAnchor, supportKind } from './nav'
 import { setUsageStats, usageStatsLast, usageStatsOn, usageStatsTestMode } from '../core/usageStats'
 import { CrashReportsRow } from './CrashReport'
+import { SosContactsSection, WhoSeesMeRow } from './Place'
 
 export function Settings() {
   const name = useSignal(ownName.value)
@@ -124,6 +125,11 @@ export function Settings() {
         )}
 
         {isSupportIdentity.value && <PublicContact />}
+
+        <Section id="location" title={texts.settings.location}>
+          <WhoSeesMeRow />
+        </Section>
+        <SosContactsSection />
 
         <Section id="devices" title={texts.settings.devices} footer={texts.settings.devicesText}>
           {ownDevices.value.map((d) => (

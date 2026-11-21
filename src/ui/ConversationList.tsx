@@ -3,6 +3,7 @@ import { computed, useSignal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
 import type { ImageRef } from 'anmp-core'
 import { texts } from '../i18n'
+import { spotLineOf } from '../core/spots'
 import { parseKey, sortOverview, type ConvKey } from '../core/messages'
 import { unread as alertsUnread } from '../core/channels'
 import { acceptRequest, circles, contactRequests, declineRequest, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, requestOrigin, stillLoading, summaries } from '../core/session'
@@ -50,7 +51,8 @@ const entries = computed<Entry[]>(() => {
     let preview = ''
     if (last?.deleted) preview = texts.chat.deletedMessage
     else if (last) {
-      const body = last.text || attachmentPreview(last.attachments)
+      // A card says what it is about (ADR 0121 §26), not the stand-in text with a link for older apps.
+      const body = spotLineOf(last) ?? (last.text || attachmentPreview(last.attachments))
       preview = last.system ? body : last.outgoing ? `${texts.list.you}: ${body}` : kind === 'circle' ? `${personName(last.fromPerson, last.fromName)}: ${body}` : body
     }
     // Messages still coming after the emergency card: „Wird geladen …“ instead of „Noch keine Nachrichten“ (ADR 0107 §8).

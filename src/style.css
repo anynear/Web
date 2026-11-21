@@ -857,3 +857,22 @@ tbody tr:last-child .abo-col.selected { box-shadow: inset 2px -2px 0 var(--signa
 /* Login with anynear (ADR 0122): three big numbers side by side. */
 .login-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .login-choice { min-height: 56px; font-size: 1.4rem; font-weight: 600; }
+
+/* Cards for places in the chat (ADR 0121 §26): in the middle, the same for sender and reader. */
+.spot-row { align-self: center; width: min(360px, 92%); margin: 10px 0; }
+.spot-row.highlight .spot-card { outline: 2px solid var(--signalorange); }
+.spot-card {
+  display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text);
+}
+.spot-title { display: flex; align-items: center; gap: 8px; }
+.spot-title svg { flex: none; }
+.spot-card.arrived .spot-title { color: var(--sicher); }
+.spot-tick { font-weight: 700; font-size: 1.1rem; width: 20px; text-align: center; }
+.spot-map { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.spot-map.done { opacity: 0.55; }
+.spot-empty {
+  display: grid; place-content: center; height: 72px; border: 1px dashed var(--line); border-radius: 12px;
+  color: var(--muted); font-size: 0.85rem;
+}
+.spot-actions { display: flex; flex-wrap: wrap; gap: 8px; }

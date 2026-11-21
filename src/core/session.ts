@@ -109,6 +109,9 @@ import { notificationsOpen, offerGuide } from './guide'
 import { checkUsageStats, startUsageStats } from './usageStats'
 import { onAliveChanged, openLifeSign, startLifeSigns } from './lifesigns'
 import { pendingLogin } from './login'
+import { EMPTY as NO_SHARING, KEYS as SHARING_KEYS, Sharing, levelOfWire, takeSettings as takeSharing, type Level, type SharingState } from './sharing'
+import { SPOT, spotLineOf } from './spots'
+import { refreshSos, startSos } from './sos'
 import { loginLinkFromUrl } from './loginLink'
 
 export type Phase = 'loading' | 'unsupported' | 'pairing' | 'ready' | 'revoked'
@@ -429,6 +432,8 @@ export async function boot() {
   refreshLoading()
   void c.setting(READ_UNTIL_SETTING).then(takeReadMarks).catch(() => {})
   void c.setting(CONTACT_NAMES_SETTING).then(takeContactNames).catch(() => {})
+  startSos(c)
+  void loadSharing(c)
   void keepOwnHistory(c)
   const id = c.identity()
   me.value = { deviceId, personId: id?.personId ?? deviceId }
@@ -731,6 +736,8 @@ function onEvent(e: CoreEvent) {
     if (marks) takeReadMarks(new TextDecoder().decode(marks))
     const names = settings.get(CONTACT_NAMES_SETTING)
     if (names) takeContactNames(new TextDecoder().decode(names))
+    takeSharingSettings(settings)
+    refreshSos()
     if (e.name) {
       ownName.value = e.name
       local.set('name', e.name)
@@ -743,6 +750,8 @@ function onEvent(e: CoreEvent) {
   if (e instanceof CoreEvent.MemberLeft) return systemLine(e.circleId, texts.system.left(e.name || texts.system.someone))
   if (e instanceof CoreEvent.KeyChanged) return onKeyChanged(e)
   if (e instanceof CoreEvent.ContactRequestsChanged) return void refreshRequests()
+  if (e instanceof CoreEvent.SosAsked) return onSosAsked(e.person)
+  if (e instanceof CoreEvent.SosContactsChanged) return refreshSos()
   if (e instanceof CoreEvent.IntroAccepted) {
     return void save([
       { id: `sys|${newMid()}`, conv: directKey(e.toPerson), outgoing: false, text: texts.people.introAcceptedLine(personName(e.toPerson), e.name), ts: Date.now(), attachments: [], system: true },
@@ -807,12 +816,14 @@ function onMessage(e: CoreEvent.Message) {
     ...(link ? { link } : {}),
     ...replyOf(e.replyTo, e.replyFrom),
     ...(e.passedOn ? { passedOn: true } : {}),
-    ...(e.spot ? { spot: { kind: e.spot.kind, latitude: e.spot.position?.latitude, longitude: e.spot.position?.longitude, at: e.spot.position ? Number(e.spot.position.at) : undefined, label: e.spot.label ?? undefined, until: e.spot.until != null ? Number(e.spot.until) : undefined } } : {}),
+    ...(e.spot ? { spot: { kind: e.spot.kind, latitude: e.spot.position?.latitude, longitude: e.spot.position?.longitude, at: e.spot.position ? Number(e.spot.position.at) : undefined, label: e.spot.label ?? undefined, until: e.spot.until != null ? Number(e.spot.until) : undefined, ...(e.spot.level != null ? { level: e.spot.level } : {}) } } : {}),
     ...(e.intro ? { intro: { id: e.intro.id, person: e.intro.person, name: e.intro.name, byPerson: e.intro.byPerson, until: Number(e.intro.until), card: e.intro.card } } : {}),
   }
   // Already deleted (the deletion came first): only the line, without notification.
   const [msg] = withParkedReceipts(withPendingDeletes([fresh]))
   void save([msg])
+  // The other side answered the question to see each other, or lowered what both agreed on (ADR 0121 §28).
+  if (!own && !e.history && msg.spot?.kind === SPOT.SHARED && parseKey(conv).kind === 'direct') onSharedAnswer(parseKey(conv).id, msg.spot.level ?? 0)
   // A person still asking (ADR 0116): one notice for the request, none per message.
   if (!own && !e.history && e.mid && !msg.deleted && !restoredRead && !e.fromRequest) {
     if (isOpen) {
@@ -1693,13 +1704,111 @@ export function imageUrl(ref: ImageRef): Promise<string | null> {
   return p
 }
 
+// --- Who sees me, sharing with each other (ADR 0121 §27–§29) -------------------------------------------------
+
+/** The levels as the person set them, on every own device. */
+export const sharingState = signal<SharingState>(NO_SHARING)
+
+export const sharing = new Sharing(
+  { write: (name, value) => void core?.setSetting(name, value).catch(() => {}) },
+  local,
+  (personId, wire) => void tellLowered(personId, wire),
+  (next) => (sharingState.value = next),
+)
+
+async function loadSharing(c: AnmpCoreWeb) {
+  const values = new Map<string, string | null>()
+  for (const key of Object.values(SHARING_KEYS)) values.set(key, (await c.setting(key).catch(() => null)) ?? null)
+  sharing.state = takeSharing(sharing.state, values)
+  sharingState.value = sharing.state
+}
+
+function takeSharingSettings(settings: ReadonlyMap<string, Uint8Array>) {
+  const values = new Map<string, string | null>()
+  for (const key of Object.values(SHARING_KEYS)) {
+    const v = settings.get(key)
+    if (v) values.set(key, new TextDecoder().decode(v))
+  }
+  if (!values.size) return
+  sharing.state = takeSharing(sharing.state, values)
+  sharingState.value = sharing.state
+}
+
+function onSharedAnswer(personId: string, wire: number) {
+  if (sharing.mutualOpen(personId)) sharing.mutualAnswered(personId, wire)
+  else sharing.remoteLowered(personId, wire)
+}
+
+/**
+ * A card about places to the person of [conv] (ADR 0121 §26): kept here at once like any sent message, [text] is what
+ * older apps show. `false` if it did not go out.
+ */
+async function sendSpot(personId: string, text: string, kind: number, level: number): Promise<boolean> {
+  const c = core
+  if (!c) return false
+  const conv = directKey(personId)
+  const mid = newMid()
+  const msg: Msg = {
+    id: mid,
+    conv,
+    mid,
+    outgoing: true,
+    fromDevice: me.value?.deviceId,
+    fromPerson: me.value?.personId,
+    text,
+    ts: Date.now(),
+    status: 'sending',
+    recipients: recipientsOf(conv),
+    attachments: [],
+    spot: { kind, level },
+  }
+  await save([msg])
+  const sent = await c.sendDirectSpot(personId, text, mid, kind, level).catch(() => null)
+  if (!sent) await save([{ ...msg, status: 'failed' }])
+  return !!sent
+}
+
+/** „Standort gegenseitig teilen“: the own place is shown at [level] from now on, and the person is asked for the same. */
+export async function askMutualPlace(personId: string, level: Level): Promise<boolean> {
+  const sent = await sendSpot(personId, texts.place.mutualMessage, SPOT.SHARE, level === 'exact' ? 3 : 2)
+  if (sent) sharing.askMutual(personId, level)
+  return sent
+}
+
+/** The answer to the question of [personId]: [level] is what both see from now on, `null` for no. */
+export async function answerMutualPlace(personId: string, level: Level | null): Promise<boolean> {
+  const t = texts.place
+  const sent = await sendSpot(personId, level ? t.mutualYesMessage : t.mutualNoMessage, SPOT.SHARED, level === 'exact' ? 3 : level === 'area' ? 2 : 0)
+  if (sent && level) sharing.agreeMutual(personId, level)
+  return sent
+}
+
+/** The own place was lowered below what both agreed on: the other side reads it in the chat. */
+async function tellLowered(personId: string, wire: number) {
+  const t = texts.place
+  await sendSpot(personId, wire === 0 ? t.mutualEndedMessage : t.mutualLoweredMessage, SPOT.SHARED, wire)
+}
+
+/** The level a wire value stands for, for the cards. */
+export function levelOfSpot(wire: number | undefined): Level {
+  return levelOfWire(wire ?? 0)
+}
+
+/** A person asks us to be its SOS contact: the dialog shows it; a quiet notification if the page is not in front. */
+function onSosAsked(person: string) {
+  refreshSos()
+  if (foreground.value) return
+  void showNotification(texts.sos.askTitle(personName(person)), texts.sos.askNotice, `sos-ask:${person}`, {}, { silent: true })
+}
+
 // --- Notifications -----------------------------------------------------------------------------------------
 
 function notify(m: Msg) {
   if (foreground.value || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   if (local.get('notify') !== '1') return
   const title = (parseKey(m.conv).kind === 'circle' ? convName(m.conv) : personName(m.fromPerson, m.fromName)) || texts.appName
-  const body = m.text || texts.notification.newMessage
+  // A card says what it is about, not the stand-in text for older apps (ADR 0121 §26).
+  const body = spotLineOf(m) ?? (m.text || texts.notification.newMessage)
   void showNotification(title, body, m.conv, { conv: m.conv })
 }
 

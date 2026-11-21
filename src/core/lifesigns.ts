@@ -2,6 +2,7 @@
 // choice, the own card with „Alles gut“, the helpers' cards with hint and alarm. The deadlines come from the core;
 // here are only view, templates and notifications. In the browser alarms are normal notifications (ADR 0062 §6), and
 // they come only while the page is open.
+import { agreedTo } from './sos'
 import { batch, signal } from '@preact/signals'
 import type { AliveStatus, AnmpCoreWeb } from 'anmp-core'
 import { texts } from '../i18n'
@@ -276,7 +277,8 @@ function notify(s: LifeSign, now: number) {
     }
   } else if (s.phase === ALARM && shown !== `alarm:${s.due}`) {
     const n = alarmNotice(s, who, now)
-    show(n.title, n.body, `alarm:${s.due}`, true)
+    // Urgent only for a person we agreed to be SOS contact for (ADR 0121 §25); any other call stays a notification.
+    show(n.title, n.body, `alarm:${s.due}`, urgent(s.owner, loudness(s.circleId)))
   }
 }
 
@@ -362,6 +364,11 @@ export function meAway(s: LifeSign): boolean {
 }
 
 export type Loudness = 'loud' | 'normal' | 'off'
+
+/** May a call of [owner] insist (stay until answered)? Only with „Laut“ and if we agreed to be its SOS contact. */
+export function urgent(owner: string, level: Loudness, agreed: (person: string) => boolean = agreedTo): boolean {
+  return level === 'loud' && agreed(owner)
+}
 
 /** As in the app per circle on this device; the browser only knows normal notifications, „Aus“ silences them. */
 export function loudness(circleId: string): Loudness {
