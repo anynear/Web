@@ -31,6 +31,7 @@ import { setUsageStats, usageStatsLast, usageStatsOn, usageStatsTestMode } from 
 import { CrashReportsRow } from './CrashReport'
 import { SosContactsSection, WhoSeesMeRow } from './Place'
 import { SosHelpersSection } from './Requests'
+import { SosSwitchOff } from './Sos'
 
 export function Settings() {
   const name = useSignal(ownName.value)
@@ -131,6 +132,7 @@ export function Settings() {
           <WhoSeesMeRow />
         </Section>
         <SosHelpersSection />
+        <SosSwitchOff />
         <SosContactsSection />
 
         <Section id="devices" title={texts.settings.devices} footer={texts.settings.devicesText}>

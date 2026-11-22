@@ -23,7 +23,7 @@ import {
 import { mapLink } from '../core/lifesigns'
 import { LEVELS, always, circleLevelFor, levelFor, ownCircleLevel, ownPersonLevel, wireOf, type Level } from '../core/sharing'
 import { SPOT, answerTo, answersQuestion, newestShare } from '../core/spots'
-import { askNow, answerSos, closeAsk, sosAgreed, sosAsking, sosAsks } from '../core/sos'
+import { askNow, answerSos, closeAsk, sosAgreed, sosAsking, sosAsks, sosNoPrecise } from '../core/sos'
 import type { Msg } from '../core/messages'
 import { parseKey } from '../core/messages'
 import { Avatar } from './Avatar'
@@ -583,7 +583,13 @@ export function SosContactsSection() {
       {agreed.length > 0 && (
         <Section id={asks.length ? undefined : 'sos'} title={t.contactFor} footer={t.contactsFooter}>
           {agreed.map((p) => (
-            <Row key={p} icon={<Icons.Person />} title={personName(p)} text={t.withdraw} onClick={() => void answerSos(p, false)} />
+            <Row
+              key={p}
+              icon={<Icons.Person />}
+              title={personName(p)}
+              text={sosNoPrecise.value.has(p) ? `${t.noPrecise}. ${t.withdraw}` : t.withdraw}
+              onClick={() => void answerSos(p, false)}
+            />
           ))}
         </Section>
       )}

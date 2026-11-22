@@ -86,6 +86,10 @@ html, body {
 }
 
 #app { height: 100%; }
+/* A call for help (22.11.2026): a red line above every page, as on the phone. */
+.shell-frame { display: flex; flex-direction: column; height: 100%; }
+.shell-frame > .shell { flex: 1; min-height: 0; height: auto; }
+.sos-banner { display: block; width: 100%; border: 0; padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); background: var(--warnrot); color: var(--alpinweiss); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 
 h1, h2 { letter-spacing: -0.02em; font-weight: 600; margin: 0; }
 h1 { font-size: 1.5rem; }
