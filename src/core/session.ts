@@ -109,9 +109,9 @@ import { notificationsOpen, offerGuide } from './guide'
 import { checkUsageStats, startUsageStats } from './usageStats'
 import { onAliveChanged, openLifeSign, startLifeSigns } from './lifesigns'
 import { pendingLogin } from './login'
-import { EMPTY as NO_SHARING, KEYS as SHARING_KEYS, Sharing, levelOfWire, takeSettings as takeSharing, type Level, type SharingState } from './sharing'
+import { EMPTY as NO_SHARING, KEYS as SHARING_KEYS, Sharing, levelOfWire, takeSettings as takeSharing, wireOf, type Level, type SharingState } from './sharing'
 import { SPOT, spotLineOf } from './spots'
-import { refreshSos, startSos } from './sos'
+import { HELPERS_KEY, answerSos, endSos, onSosCard, refreshSos, sosAgreed, sosContacts, startSos, takeHelpers } from './sos'
 import { loginLinkFromUrl } from './loginLink'
 
 export type Phase = 'loading' | 'unsupported' | 'pairing' | 'ready' | 'revoked'
@@ -432,8 +432,8 @@ export async function boot() {
   refreshLoading()
   void c.setting(READ_UNTIL_SETTING).then(takeReadMarks).catch(() => {})
   void c.setting(CONTACT_NAMES_SETTING).then(takeContactNames).catch(() => {})
-  startSos(c)
-  void loadSharing(c)
+  startSos(c, local, (circleId) => (circles.value.find((x) => x.id === circleId)?.members ?? []).map((p) => p.id).filter((id) => id !== me.value?.personId))
+  void loadSharing(c).then(() => migrateSharings(c))
   void keepOwnHistory(c)
   const id = c.identity()
   me.value = { deviceId, personId: id?.personId ?? deviceId }
@@ -737,6 +737,8 @@ function onEvent(e: CoreEvent) {
     const names = settings.get(CONTACT_NAMES_SETTING)
     if (names) takeContactNames(new TextDecoder().decode(names))
     takeSharingSettings(settings)
+    const helpers = settings.get(HELPERS_KEY)
+    if (helpers) takeHelpers(new TextDecoder().decode(helpers))
     refreshSos()
     if (e.name) {
       ownName.value = e.name
@@ -752,6 +754,7 @@ function onEvent(e: CoreEvent) {
   if (e instanceof CoreEvent.ContactRequestsChanged) return void refreshRequests()
   if (e instanceof CoreEvent.SosAsked) return onSosAsked(e.person)
   if (e instanceof CoreEvent.SosContactsChanged) return refreshSos()
+  if (e instanceof CoreEvent.SharingChanged) return refreshSharings()
   if (e instanceof CoreEvent.IntroAccepted) {
     return void save([
       { id: `sys|${newMid()}`, conv: directKey(e.toPerson), outgoing: false, text: texts.people.introAcceptedLine(personName(e.toPerson), e.name), ts: Date.now(), attachments: [], system: true },
@@ -785,6 +788,12 @@ function onKeyChanged(e: CoreEvent.KeyChanged) {
 function systemLine(circleId: string, text: string) {
   void save([{ id: `sys|${newMid()}`, conv: circleKey(circleId), outgoing: false, text, ts: Date.now(), attachments: [], system: true }])
 }
+
+// A step about SOS contacts as a card in the chat with the person (ADR 0123 §5); kept in this browser only.
+onSosCard((person, card) => {
+  if (!people.value.has(person)) return
+  void save([{ id: `sos|${newMid()}`, conv: directKey(person), outgoing: false, text: texts.sos.card(card, personName(person)), ts: Date.now(), attachments: [], system: true, sos: card }])
+})
 
 function onMessage(e: CoreEvent.Message) {
   const ownPerson = me.value?.personId
@@ -822,8 +831,6 @@ function onMessage(e: CoreEvent.Message) {
   // Already deleted (the deletion came first): only the line, without notification.
   const [msg] = withParkedReceipts(withPendingDeletes([fresh]))
   void save([msg])
-  // The other side answered the question to see each other, or lowered what both agreed on (ADR 0121 §28).
-  if (!own && !e.history && msg.spot?.kind === SPOT.SHARED && parseKey(conv).kind === 'direct') onSharedAnswer(parseKey(conv).id, msg.spot.level ?? 0)
   // A person still asking (ADR 0116): one notice for the request, none per message.
   if (!own && !e.history && e.mid && !msg.deleted && !restoredRead && !e.fromRequest) {
     if (isOpen) {
@@ -1454,6 +1461,10 @@ export function resetInvites(circleId: string): Promise<void> {
 }
 
 export async function removeContact(personId: string) {
+  // Removing a contact ends every sharing with it (ADR 0123 §4); the person reads it in the chat, while it still can.
+  await endSharing(personId).catch(() => false)
+  if (sosContacts.value.get(personId) === 2) await endSos(personId)
+  if (sosAgreed.value.includes(personId)) await answerSos(personId, false)
   await core!.removeContact(personId)
   refresh()
 }
@@ -1712,9 +1723,46 @@ export const sharingState = signal<SharingState>(NO_SHARING)
 export const sharing = new Sharing(
   { write: (name, value) => void core?.setSetting(name, value).catch(() => {}) },
   local,
-  (personId, wire) => void tellLowered(personId, wire),
   (next) => (sharingState.value = next),
 )
+
+/** „Standort freigeben“ (ADR 0123 §2), as the core keeps it from the cards in the chat: per person. */
+export interface SharingView {
+  person: string
+  /** What both show each other, `null` for none. */
+  level: Level | null
+  /** An open question at that level, `null` for none, by the own person if [askedByUs]. */
+  asked: Level | null
+  askedByUs: boolean
+}
+
+export const sharings = signal<Map<string, SharingView>>(new Map())
+
+/** Reads the sharings from the core (after start and `SharingChanged`). */
+export function refreshSharings() {
+  const c = core
+  if (!c) return
+  try {
+    const next = new Map<string, SharingView>()
+    for (const s of c.sharings()) {
+      next.set(s.person, { person: s.person, level: s.level > 0 ? levelOfWire(s.level) : null, asked: s.asked > 0 ? levelOfWire(s.asked) : null, askedByUs: s.askedByUs })
+    }
+    sharings.value = next
+  } catch {
+    // An older core without sharings: nothing to show.
+  }
+}
+
+/** The level both agreed on with [personId], `null` for none. */
+export function sharedLevel(personId: string): Level | null {
+  return sharings.value.get(personId)?.level ?? null
+}
+
+/** What this browser kept itself before the core knew sharings (ADR 0123 §9): once, into the core. */
+async function migrateSharings(c: AnmpCoreWeb) {
+  await sharing.migrateMutual([...people.value.keys()], (id, level, asked) => c.adoptSharing(id, level ? wireOf(level) : 0, asked ? wireOf(asked) : 0))
+  refreshSharings()
+}
 
 async function loadSharing(c: AnmpCoreWeb) {
   const values = new Map<string, string | null>()
@@ -1732,11 +1780,6 @@ function takeSharingSettings(settings: ReadonlyMap<string, Uint8Array>) {
   if (!values.size) return
   sharing.state = takeSharing(sharing.state, values)
   sharingState.value = sharing.state
-}
-
-function onSharedAnswer(personId: string, wire: number) {
-  if (sharing.mutualOpen(personId)) sharing.mutualAnswered(personId, wire)
-  else sharing.remoteLowered(personId, wire)
 }
 
 /**
@@ -1778,25 +1821,38 @@ export function theirLevel(personId: string): Level | null {
   return p ? levelOfWire(p.level) : null
 }
 
-/** „Standort freigeben“: the own place is shown at [level] from now on, and the person is asked for the same. */
-export async function askMutualPlace(personId: string, level: Level): Promise<boolean> {
-  const sent = await sendSpot(personId, texts.place.mutualMessage, SPOT.SHARE, level === 'exact' ? 3 : 2)
-  if (sent) sharing.askMutual(personId, level)
+/** „Standort freigeben“ (ADR 0123 §2): asks [personId] that both see each other at [level]; nothing goes out before the yes. */
+export async function askSharing(personId: string, level: Level): Promise<boolean> {
+  const sent = await sendSpot(personId, texts.place.mutualMessage, SPOT.SHARE, wireOf(level))
+  refreshSharings()
   return sent
 }
 
-/** The answer to the question of [personId]: [level] is what both see from now on, `null` for no. */
-export async function answerMutualPlace(personId: string, level: Level | null): Promise<boolean> {
+/** The answer to the open question of [personId]: [accept] at the level asked for, or no. */
+export async function answerSharing(personId: string, accept: boolean): Promise<boolean> {
+  const s = sharings.value.get(personId)
+  if (!s?.asked || s.askedByUs) return false
   const t = texts.place
-  const sent = await sendSpot(personId, level ? t.mutualYesMessage : t.mutualNoMessage, SPOT.SHARED, level === 'exact' ? 3 : level === 'area' ? 2 : 0)
-  if (sent && level) sharing.agreeMutual(personId, level)
+  const sent = await sendSpot(personId, accept ? t.mutualYesMessage : t.mutualNoMessage, SPOT.SHARED, accept ? wireOf(s.asked) : 0)
+  refreshSharings()
   return sent
 }
 
-/** The own place was lowered below what both agreed on: the other side reads it in the chat. */
-async function tellLowered(personId: string, wire: number) {
-  const t = texts.place
-  await sendSpot(personId, wire === 0 ? t.mutualEndedMessage : t.mutualLoweredMessage, SPOT.SHARED, wire)
+/** Takes back the own open question to [personId]. */
+export async function withdrawSharing(personId: string): Promise<boolean> {
+  if (!sharings.value.get(personId)?.askedByUs) return false
+  const sent = await sendSpot(personId, texts.place.sharingWithdrawnMessage, SPOT.WITHDRAWN, -1)
+  refreshSharings()
+  return sent
+}
+
+/** Ends the sharing with [personId] for both, an open question with it. */
+export async function endSharing(personId: string): Promise<boolean> {
+  const s = sharings.value.get(personId)
+  if (!s?.level && !s?.asked) return false
+  const sent = await sendSpot(personId, texts.place.mutualEndedMessage, SPOT.ENDED, -1)
+  refreshSharings()
+  return sent
 }
 
 /** The level a wire value stands for, for the cards. */

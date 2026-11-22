@@ -6,17 +6,18 @@ import { texts } from '../i18n'
 import { spotLineOf } from '../core/spots'
 import { parseKey, sortOverview, type ConvKey } from '../core/messages'
 import { unread as alertsUnread } from '../core/channels'
-import { acceptRequest, circles, contactRequests, declineRequest, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, requestOrigin, stillLoading, summaries } from '../core/session'
+import { circles, listedConvs, loadingCircles, loadingMailbox, open, openConv, people, personName, stillLoading, summaries } from '../core/session'
 import { Avatar } from './Avatar'
 import { formatListTime } from './format'
 import * as Icons from './icons'
+import { RequestsLine } from './Requests'
 import { AlertsNav } from './Alerts'
 import { FilesNav } from './Files'
 import { CirclesNav, NewMessageNav, PickSections, pickHits } from './People'
 import { MainHeader } from './MainMenu'
 import { chatSearch, forwarding, newMessage, pane, section } from './nav'
 import { CrashCard } from './CrashReport'
-import { Button, Dialog, Row } from './components'
+import { Dialog, Row } from './components'
 import { DeleteHistoryConfirm, LeaveCircleConfirm, toCircle, toPerson } from './Details'
 
 interface Entry {
@@ -124,7 +125,8 @@ export function ConversationList() {
       ) : (
         <>
           {!q && <CrashCard />}
-          {!q && <RequestCards />}
+          {/* Everything that waits for an answer, in one line to the list „Anfragen“ (ADR 0123 §6). */}
+          {!q && <RequestsLine />}
           {/* New device or back from the emergency card: the messages are still coming (ADR 0107 §8). */}
           {(loadingMailbox.value || loadingCircles.value.length > 0) && <p class="hint">{texts.list.messagesLoading}</p>}
           <div class="list-tools">
@@ -268,54 +270,3 @@ function attachmentPreview(list: { type: string; name: string }[]): string {
   return `📎 ${a.name || (a.type === 'pdf' ? texts.attachment.pdf : texts.attachment.file)}`
 }
 
-/**
- * Persons asking to become a contact (ADR 0116), as in the app: agree or decline; what they wrote waits until then.
- * Several requests are one card that unfolds, so that they do not push the chats out of sight.
- */
-function RequestCards() {
-  const unfolded = useSignal(false)
-  const list = contactRequests.value
-  return (
-    <>
-      {list.length > 1 && (
-        <div class="nav-note crash-card">
-          <div class="card-pad">
-            <strong>{texts.people.requestsTitle(list.length)}</strong>
-            <div class="crash-actions">
-              <Button kind={unfolded.value ? 'quiet' : 'secondary'} onClick={() => (unfolded.value = !unfolded.value)}>
-                {unfolded.value ? texts.people.requestsHide : texts.people.requestsShow}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-      {(list.length === 1 || unfolded.value) &&
-        list.map((r) => (
-          <div key={r.person} class="nav-note crash-card">
-            <div class="card-pad">
-              <strong>{texts.people.requestTitle(r.name)}</strong>
-              <p class="muted small">{requestOrigin(r)}</p>
-              <div class="crash-actions">
-                <Button
-                  kind="secondary"
-                  onClick={() =>
-                    void acceptRequest(r.person).then((conv) => {
-                      if (!conv) return
-                      pane.value = 'chat'
-                      chatSearch.value = false
-                      open(conv)
-                    })
-                  }
-                >
-                  {texts.people.requestAgree}
-                </Button>
-                <Button kind="quiet" onClick={() => void declineRequest(r.person)}>
-                  {texts.people.requestDecline}
-                </Button>
-              </div>
-            </div>
-          </div>
-        ))}
-    </>
-  )
-}

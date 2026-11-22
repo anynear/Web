@@ -55,6 +55,8 @@ export interface Msg {
   history?: boolean
   /** Line about a change in the circle instead of a message (ADR 0012). */
   system?: boolean
+  /** With [system]: a step about SOS contacts with the person of the chat, as a card (ADR 0123 §5, `SOS_CARD`). */
+  sos?: number
   /** Deleted for everyone by the author (ADR 0068): only sender, time and ID remain. Missing in older entries. */
   deleted?: boolean
   /** Preview of the first link, sent along by the sender (ADR 0069). */

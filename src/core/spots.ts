@@ -11,8 +11,12 @@ export const SPOT = {
   ARRIVED: 5,
   /** Asking to see each other's place, field 4 the level. */
   SHARE: 6,
-  /** The answer to [SHARE], or that someone lowered what both agreed on; field 4 the level, 0 for no. */
+  /** The answer to [SHARE], field 4 the level as a yes, 0 for no; older apps also lowered or ended with it. */
   SHARED: 7,
+  /** The sender ended the sharing for both (ADR 0123 §2). */
+  ENDED: 8,
+  /** The sender took back its own open question. */
+  WITHDRAWN: 9,
 } as const
 
 /** The line for the overview and notifications, as `spotLineOf` in the app. */
@@ -31,6 +35,10 @@ export function spotLine(kind: number, label: string | undefined, outgoing: bool
       return t.mutualNotice
     case SPOT.SHARED:
       return t.mutualAnswerNotice
+    case SPOT.ENDED:
+      return outgoing ? t.sharingEndedOwnNotice : t.sharingEndedNotice
+    case SPOT.WITHDRAWN:
+      return t.sharingWithdrawnNotice
     default:
       return outgoing ? t.spotHereOwn : t.noticeHere
   }
@@ -46,11 +54,6 @@ export function answerTo(ask: Msg, all: Msg[]): Msg | undefined {
   return all.find((m) => m.conv === ask.conv && m.ts > ask.ts && m.outgoing !== ask.outgoing && m.spot?.kind === SPOT.HERE)
 }
 
-/** Was the question [ask] to see each other answered by the other side since? */
-export function mutualAnswered(ask: Msg, all: Msg[]): boolean {
-  return all.some((m) => m.conv === ask.conv && m.ts > ask.ts && m.outgoing !== ask.outgoing && m.spot?.kind === SPOT.SHARED)
-}
-
 /**
  * Does [answer] (kind [SPOT.SHARED]) answer a question of the other side? Otherwise it says that someone lowered later
  * what both agreed on.
@@ -59,13 +62,13 @@ export function answersQuestion(answer: Msg, all: Msg[]): boolean {
   let before: Msg | undefined
   for (const m of all) {
     if (m.conv !== answer.conv || m.ts >= answer.ts) continue
-    if (m.spot?.kind !== SPOT.SHARE && m.spot?.kind !== SPOT.SHARED) continue
+    if (!m.spot || m.spot.kind < SPOT.SHARE || m.spot.kind > SPOT.WITHDRAWN) continue
     if (!before || m.ts >= before.ts) before = m
   }
   return !!before && before.spot?.kind === SPOT.SHARE && before.outgoing !== answer.outgoing
 }
 
-/** Is [m] the newest card of kind [SPOT.SHARED] in its conversation? „Weiter zeigen“ sits only on that one. */
-export function newestShared(m: Msg, all: Msg[]): boolean {
-  return !all.some((x) => x.conv === m.conv && x.spot?.kind === SPOT.SHARED && x.ts > m.ts)
+/** Is [m] the newest question to share the place in its conversation? Only that one carries the buttons. */
+export function newestShare(m: Msg, all: Msg[]): boolean {
+  return !all.some((x) => x.conv === m.conv && x.spot?.kind === SPOT.SHARE && x.ts > m.ts)
 }

@@ -21,6 +21,7 @@ import { Settings } from './Settings'
 import { SupportPage } from './Support'
 import { RadioSetupPage } from './RadioSetup'
 import { SosAskDialog, WhoSeesMePage } from './Place'
+import { RequestsPage } from './Requests'
 
 export function App() {
   // „Funkgerät einrichten“ also works without pairing (link from the iOS app, ADR 0095).
@@ -120,7 +121,7 @@ function Main() {
         ? channel
           ? 'channel'
           : 'none'
-        : pane.value === 'settings' || pane.value === 'support' || pane.value === 'radio' || pane.value === 'whoSeesMe'
+        : pane.value === 'settings' || pane.value === 'support' || pane.value === 'radio' || pane.value === 'whoSeesMe' || pane.value === 'requests'
           ? pane.value
           : conv
             ? pane.value
@@ -132,6 +133,7 @@ function Main() {
         {right === 'settings' && <Settings />}
         {right === 'radio' && <RadioSetupPage />}
         {right === 'whoSeesMe' && <WhoSeesMePage />}
+        {right === 'requests' && <RequestsPage />}
         {right === 'support' && <SupportPage key={supportKind.value} kind={supportKind.value} />}
         {right === 'details' && conv && <Details key={conv} conv={conv} />}
         {/* New per conversation: list, search and draft depend on the conversation. */}

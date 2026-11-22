@@ -4,9 +4,12 @@
 import { useState } from 'preact/hooks'
 import { texts } from '../i18n'
 import {
-  answerMutualPlace,
-  askMutualPlace,
+  answerSharing,
+  askSharing,
   circles,
+  endSharing,
+  withdrawSharing,
+  sharings,
   isSupportCircle,
   me,
   messages,
@@ -18,9 +21,9 @@ import {
   type Person,
 } from '../core/session'
 import { mapLink } from '../core/lifesigns'
-import { always, levelFor, ownCircleLevel, ownPersonLevel, wireOf, type Level } from '../core/sharing'
-import { SPOT, answerTo, answersQuestion, mutualAnswered, newestShared } from '../core/spots'
-import { askLater, askNow, askedLater, answerSos, currentAsk, sosAgreed, sosAsks } from '../core/sos'
+import { LEVELS, always, circleLevelFor, levelFor, ownCircleLevel, ownPersonLevel, wireOf, type Level } from '../core/sharing'
+import { SPOT, answerTo, answersQuestion, newestShare } from '../core/spots'
+import { askNow, answerSos, closeAsk, sosAgreed, sosAsking, sosAsks } from '../core/sos'
 import type { Msg } from '../core/messages'
 import { parseKey } from '../core/messages'
 import { Avatar } from './Avatar'
@@ -118,15 +121,19 @@ export function WhoSeesMePage() {
               const own = ownPersonLevel(s, p.id, now)
               const inCircles = p.circles.filter((c) => list.some((x) => x.id === c))
               const level = levelName(levelFor(s, p.id, inCircles, now))
-              const mutual = sharing.agreed(p.id) ? ` · ${t.mutualMark}` : ''
+              const shared = sharings.value.get(p.id)?.level ?? null
+              const fromYou = own && wireOf(own) > wireOf(circleLevelFor(s, p.id, inCircles, now)) ? ` · ${t.onlyFromYou}` : ''
               return (
                 <Row
                   key={p.id}
                   icon={<Avatar id={p.id} kind="person" size={40} image={p.image} />}
                   title={p.name}
                   text={
-                    own
-                      ? levelName(own) + until(`p:${p.id}`) + mutual
+                    // A sharing both agreed on goes before the rest (ADR 0123 §8).
+                    shared
+                      ? t.sharingRow(levelName(shared))
+                      : own
+                      ? levelName(own) + until(`p:${p.id}`) + fromYou
                       : inCircles.some((c) => ownCircleLevel(s, c, now))
                         ? t.likeCircles(level)
                         : t.likeAll(level)
@@ -167,7 +174,8 @@ export function WhoSeesMePage() {
       {editing?.kind === 'person' && (
         <LevelDialog
           title={t.chooseLevel(personName(editing.id))}
-          levels={['off', 'when', 'area', 'exact']}
+          // For a person only less than its circles give (ADR 0123 §8); more is „Standort freigeben“.
+          levels={LEVELS.filter((l) => wireOf(l) <= wireOf(circleLevelFor(s, editing.id, (people.value.get(editing.id)?.circles ?? []).filter((c) => list.some((x) => x.id === c)), now)))}
           current={ownPersonLevel(s, editing.id, now)}
           follow={t.followsCircles}
           onClose={() => setEditing(null)}
@@ -246,57 +254,118 @@ export function WhoSeesMeRow() {
 
 // --- Standort freigeben (ADR 0121 §28) ----------------------------------------------------------------------------
 
-/**
- * First what the person and the other already show each other, also when it was set up elsewhere (a circle, „Wer
- * sieht mich?“, the phone); then, if there is more to ask for, the level. The own place is shown at it from then on.
- */
-export function MutualPlaceDialog({ personId, onClose }: { personId: string; onClose: () => void }) {
+/** Where the person and [personId] stand (ADR 0123 §7): what each shows, the sharing and an open question. */
+export function betweenWith(personId: string) {
+  void sharingState.value
+  const v = sharings.value.get(personId)
+  const inCircles = people.value.get(personId)?.circles.filter((c) => shownCircles().some((x) => x.id === c)) ?? []
+  return sharing.between(personId, inCircles, theirLevel(personId), Date.now(), v?.level ?? null, v?.asked ?? null, v?.askedByUs ?? false)
+}
+
+/** „Annehmen“ and „Ablehnen“ for the question of [personId], the same everywhere (ADR 0123 §1). */
+export function SharingAnswerButtons({ personId }: { personId: string }) {
+  const t = texts.place
+  const [busy, setBusy] = useState(false)
+  const answer = async (accept: boolean) => {
+    setBusy(true)
+    await answerSharing(personId, accept)
+    setBusy(false)
+  }
+  return (
+    <div class="spot-actions">
+      <Button kind="secondary" disabled={busy} onClick={() => void answer(true)}>
+        {t.sharingAccept}
+      </Button>
+      <Button kind="quiet" disabled={busy} onClick={() => void answer(false)}>
+        {t.sharingDecline}
+      </Button>
+    </div>
+  )
+}
+
+/** What holds between the person and [personId], with the buttons for it (ADR 0123 §7), as `SharingState` in the app. */
+export function SharingState({ personId }: { personId: string }) {
   const t = texts.place
   const name = personName(personId)
-  // Reading the signal keeps the state current after a change on another own device.
-  sharingState.value
-  const inCircles = people.value.get(personId)?.circles.filter((c) => shownCircles().some((x) => x.id === c)) ?? []
-  const b = sharing.between(personId, inCircles, theirLevel(personId), Date.now())
+  const b = betweenWith(personId)
+  return (
+    <div class="sharing-state">
+      {b.shared && (
+        <>
+          <p>
+            <strong>{t.mutualBoth(name, b.shared === 'exact')}</strong>
+          </p>
+          <Button kind="quiet" onClick={() => void endSharing(personId)}>
+            {t.sharingEnd}
+          </Button>
+        </>
+      )}
+      {b.asked &&
+        (b.askedByUs ? (
+          <>
+            <p>
+              <strong>{t.sharingAskedOwn(name, b.asked === 'exact')}</strong>
+              <br />
+              <span class="muted small">{t.sharingWaiting}</span>
+            </p>
+            <Button kind="quiet" onClick={() => void withdrawSharing(personId)}>
+              {t.sharingWithdraw}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p>
+              <strong>{t.mutualAskBy(name, b.asked === 'exact')}</strong>
+            </p>
+            <SharingAnswerButtons personId={personId} />
+          </>
+        ))}
+      <p class="muted small">
+        {t.mutualMine(name, levelName(b.mine))}
+        <br />
+        {t.mutualTheirs(name, levelName(b.theirs))}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * „Standort freigeben“ (ADR 0123 §2, §7): first what holds and what is open, with its buttons, then the levels one can
+ * ask for. Nothing goes out before the other person accepts.
+ */
+export function SharingDialog({ personId, onClose }: { personId: string; onClose: () => void }) {
+  const t = texts.place
+  const b = betweenWith(personId)
   const [level, setLevel] = useState<Level>(b.suggested ?? 'area')
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   return (
-    <Dialog title={t.mutualTitle(name)} onClose={onClose}>
+    <Dialog title={t.mutualTitle(personName(personId))} onClose={onClose}>
       <div class="dialog-body">
-        {b.exists && (
+        <SharingState personId={personId} />
+        {b.askable.length > 0 && (
           <>
-            {b.both && (
-              <p>
-                <strong>{t.mutualBoth(name, b.both === 'exact')}</strong>
-              </p>
-            )}
-            <p>
-              {t.mutualMine(name, levelName(b.mine))}
-              <br />
-              {t.mutualTheirs(name, levelName(b.theirs))}
-            </p>
-            {b.open && <p class="muted small">{t.mutualWaiting(name)}</p>}
-            <p class="muted small">{t.mutualChange}</p>
+            <p>{b.exists ? t.sharingOther : t.mutualText}</p>
+            {(
+              [
+                ['area', t.mutualArea, t.mutualAreaText],
+                ['exact', t.mutualExact, t.mutualExactText],
+              ] as const
+            )
+              .filter(([l]) => b.askable.includes(l))
+              .map(([l, title, text]) => (
+                <label key={l} class="radio-row">
+                  <input type="radio" name="mutual" checked={level === l} onChange={() => setLevel(l)} />
+                  <span>
+                    <strong>{title}</strong>
+                    <br />
+                    <span class="muted small">{text}</span>
+                  </span>
+                </label>
+              ))}
+            {b.shared && <p class="muted small">{t.sharingKeeps}</p>}
           </>
         )}
-        {b.askable.length > 0 && <p>{b.exists ? t.mutualMore : t.mutualText}</p>}
-        {(
-          [
-            ['area', t.mutualArea, t.mutualAreaText],
-            ['exact', t.mutualExact, t.mutualExactText],
-          ] as const
-        )
-          .filter(([l]) => b.askable.includes(l))
-          .map(([l, title, text]) => (
-            <label key={l} class="radio-row">
-              <input type="radio" name="mutual" checked={level === l} onChange={() => setLevel(l)} />
-              <span>
-                <strong>{title}</strong>
-                <br />
-                <span class="muted small">{text}</span>
-              </span>
-            </label>
-          ))}
         {failed && <p class="field-error">{t.sendFailed}</p>}
         <div class="dialog-actions">
           {b.askable.length === 0 ? (
@@ -313,7 +382,7 @@ export function MutualPlaceDialog({ personId, onClose }: { personId: string; onC
                 disabled={busy}
                 onClick={async () => {
                   setBusy(true)
-                  const ok = await askMutualPlace(personId, b.askable.includes(level) ? level : (b.suggested ?? level))
+                  const ok = await askSharing(personId, b.askable.includes(level) ? level : (b.suggested ?? level))
                   setBusy(false)
                   if (ok) onClose()
                   else setFailed(true)
@@ -340,7 +409,7 @@ export function SpotEvent({ m }: { m: Msg }) {
   const t = texts.place
   const who = personName(m.fromPerson, m.fromName)
   const all = messages.value
-  if (s.kind === SPOT.SHARE || s.kind === SPOT.SHARED) return <MutualCard m={m} who={who} all={all} />
+  if (s.kind >= SPOT.SHARE && s.kind <= SPOT.WITHDRAWN) return <MutualCard m={m} who={who} all={all} />
   if (s.kind === SPOT.ALL) {
     const over = !!s.until && s.until <= Date.now()
     return (
@@ -417,89 +486,59 @@ function MutualCard({ m, who, all }: { m: Msg; who: string; all: Msg[] }) {
   const { kind: convKind, id } = parseKey(m.conv)
   const other = convKind === 'direct' ? personName(id) : who
   const exact = s.level === wireOf('exact')
-  const [busy, setBusy] = useState(false)
-  const [failed, setFailed] = useState(false)
-  // Reading the state keeps „Weiter zeigen“ current.
-  void sharingState.value
-  if (s.kind === SPOT.SHARED) {
-    const agreed = (s.level ?? 0) > 0
-    if (!answersQuestion(m, all)) {
-      const kept = !m.outgoing && convKind === 'direct' && newestShared(m, all) ? sharing.kept(id) : null
-      return (
-        <div class="spot-card">
-          <div class="spot-title">
-            <Icons.Map size={20} />
-            <strong>{m.outgoing ? t.mutualLoweredOwn(other, agreed) : t.mutualLoweredBy(who, agreed)}</strong>
-          </div>
-          <span class="muted small">{m.outgoing ? t.mutualLoweredOwnText(other) : t.mutualLoweredText(who, agreed)}</span>
-          {kept && (
-            <Button kind="quiet" onClick={() => sharing.keepShowing(id)}>
-              {t.mutualKeep(levelName(kept))}
-            </Button>
-          )}
-        </div>
-      )
-    }
-    return (
-      <div class={`spot-card ${agreed ? 'arrived' : ''}`}>
-        <div class="spot-title">
-          {agreed ? <span class="spot-tick" aria-hidden="true">✓</span> : <Icons.Close size={20} />}
-          <strong>
-            {agreed
-              ? m.outgoing
-                ? t.mutualAgreedOwn(exact)
-                : t.mutualAgreedBy(who, exact)
-              : m.outgoing
-                ? t.mutualRefusedOwn
-                : t.mutualRefusedBy(who)}
-          </strong>
-        </div>
-        <span class="muted small">{!agreed && !m.outgoing ? t.mutualRefusedBack : t.mutualChange}</span>
-      </div>
-    )
-  }
-  const answered = mutualAnswered(m, all)
-  const answer = async (level: Level | null) => {
-    setBusy(true)
-    const ok = await answerMutualPlace(id, level)
-    setBusy(false)
-    setFailed(!ok)
-  }
+  const v = convKind === 'direct' ? sharings.value.get(id) : undefined
+  let title: string
+  let good = false
+  if (s.kind === SPOT.SHARE) title = m.outgoing ? t.sharingAskedOwn(other, exact) : t.mutualAskBy(who, exact)
+  else if (s.kind === SPOT.SHARED) {
+    const yes = (s.level ?? 0) > 0
+    // An answer follows a question of the other side; older apps also sent it later to lower or end.
+    if (!answersQuestion(m, all)) title = m.outgoing ? t.mutualLoweredOwn(other, yes) : t.mutualLoweredBy(who, yes)
+    else if (yes) {
+      good = true
+      title = m.outgoing ? t.sharingAcceptedOwn(exact) : t.sharingAcceptedBy(who, exact)
+    } else title = m.outgoing ? t.sharingDeclinedOwn : t.sharingDeclinedBy(who)
+  } else if (s.kind === SPOT.ENDED) title = m.outgoing ? t.sharingEndedOwn : t.sharingEndedBy(who)
+  else title = m.outgoing ? t.sharingWithdrawnOwn : t.sharingWithdrawnBy(who)
+  // Only the newest open question in this chat has buttons.
+  const open =
+    s.kind === SPOT.SHARE &&
+    newestShare(m, all) &&
+    !!v?.asked &&
+    v.askedByUs === m.outgoing &&
+    wireOf(v.asked) === s.level
   return (
-    <div class="spot-card">
+    <div class={`spot-card ${good ? 'arrived' : ''}`}>
       <div class="spot-title">
-        <Icons.Map size={20} />
-        <strong>{m.outgoing ? t.mutualAskOwn(other, exact) : t.mutualAskBy(who, exact)}</strong>
+        {good ? <span class="spot-tick" aria-hidden="true">✓</span> : s.kind === SPOT.SHARE ? <Icons.Map size={20} /> : <Icons.Close size={20} />}
+        <strong>{title}</strong>
       </div>
-      {!answered && m.outgoing && <span class="muted small">{t.mutualOwnHint}</span>}
-      {!answered && !m.outgoing && convKind === 'direct' && (
-        <>
-          <span class="muted small">{t.mutualAlready(who, exact)}</span>
-          <div class="spot-actions">
-            <Button kind="secondary" disabled={busy} onClick={() => void answer(exact ? 'exact' : 'area')}>
-              {t.mutualYes(exact)}
-            </Button>
-            {exact && (
-              <Button kind="quiet" disabled={busy} onClick={() => void answer('area')}>
-                {t.mutualOnlyArea}
+      {open &&
+        (m.outgoing ? (
+          <>
+            <span class="muted small">{t.sharingWaiting}</span>
+            <div class="spot-actions">
+              <Button kind="quiet" onClick={() => void withdrawSharing(id)}>
+                {t.sharingWithdraw}
               </Button>
-            )}
-            <Button kind="quiet" disabled={busy} onClick={() => void answer(null)}>
-              {t.mutualNo}
-            </Button>
-          </div>
-          {failed && <span class="field-error">{t.sendFailed}</span>}
-        </>
-      )}
+            </div>
+          </>
+        ) : (
+          <>
+            {v?.level && <span class="muted small">{t.sharingKeeps}</span>}
+            <SharingAnswerButtons personId={id} />
+          </>
+        ))}
     </div>
   )
 }
 
 // --- SOS-Kontakte (ADR 0121 §25) ---------------------------------------------------------------------------------
 
-/** A person asks to have us as SOS contact: yes, no or later, on every page (as SosAskDialog in the app). */
+/** The question of someone who asks to have us as SOS contact, opened from a list; never by itself (ADR 0123 §6). */
 export function SosAskDialog() {
-  const ask = currentAsk(sosAsks.value, askedLater.value)
+  const asking = sosAsking.value
+  const ask = sosAsks.value.find((a) => a.person === asking)
   const [busy, setBusy] = useState(false)
   if (!ask) return null
   const t = texts.sos
@@ -510,18 +549,15 @@ export function SosAskDialog() {
     setBusy(false)
   }
   return (
-    <Dialog key={ask.person} title={t.askTitle(name)} onClose={() => askLater(ask.person)}>
+    <Dialog key={ask.person} title={t.askTitle(name)} onClose={closeAsk}>
       <div class="dialog-body">
         <p>{t.askText(name)}</p>
         <div class="dialog-actions">
-          <Button kind="quiet" disabled={busy} onClick={() => askLater(ask.person)}>
-            {t.askLater}
-          </Button>
           <Button kind="quiet" disabled={busy} onClick={() => void answer(false)}>
-            {t.askNo}
+            {texts.place.sharingDecline}
           </Button>
           <Button kind="primary" disabled={busy} onClick={() => void answer(true)}>
-            {t.askYes}
+            {texts.place.sharingAccept}
           </Button>
         </div>
       </div>
