@@ -111,7 +111,7 @@ import { onAliveChanged, openLifeSign, startLifeSigns } from './lifesigns'
 import { pendingLogin } from './login'
 import { EMPTY as NO_SHARING, KEYS as SHARING_KEYS, Sharing, levelOfWire, takeSettings as takeSharing, wireOf, type Level, type SharingState } from './sharing'
 import { SPOT, spotLineOf } from './spots'
-import { HELPERS_KEY, answerSos, endSos, onSosCard, refreshSos, sosAgreed, sosContacts, startSos, takeHelpers } from './sos'
+import { HELPERS_KEY, answerSos, endSos, onSosCard, refreshSos, refreshSosCalls, sosAgreed, sosContacts, startSos, takeHelpers } from './sos'
 import { loginLinkFromUrl } from './loginLink'
 
 export type Phase = 'loading' | 'unsupported' | 'pairing' | 'ready' | 'revoked'
@@ -754,6 +754,7 @@ function onEvent(e: CoreEvent) {
   if (e instanceof CoreEvent.ContactRequestsChanged) return void refreshRequests()
   if (e instanceof CoreEvent.SosAsked) return onSosAsked(e.person)
   if (e instanceof CoreEvent.SosContactsChanged) return refreshSos()
+  if (e instanceof CoreEvent.SosChanged) return refreshSosCalls()
   if (e instanceof CoreEvent.SharingChanged) return refreshSharings()
   if (e instanceof CoreEvent.IntroAccepted) {
     return void save([
