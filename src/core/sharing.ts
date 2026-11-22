@@ -2,8 +2,8 @@
 // person on all its devices (ADR 0106): the browser reads and changes them, the phone acts on them. The browser itself
 // sends no place: a browser does not locate in the background (ADR 0121, Folgen).
 //
-// Sharing with each other (§28) is kept here like on the phone: what both agreed on, what held before asking, and what
-// one showed before the other side lowered. Those stay in this browser, as they stay on the phone in the app.
+// „Standort freigeben“ (ADR 0123) is kept by the core from the cards in the chat, on every own device; [shared] gives
+// its level here. What this browser kept itself before moves into the core once ([Sharing.migrateMutual]).
 
 /** The four levels (ADR 0121 §24): every level includes the ones before. */
 export type Level = 'off' | 'when' | 'area' | 'exact'
@@ -145,39 +145,42 @@ export function ownPersonLevel(s: SharingState, personId: string, now: number): 
  * [evenPaused]); the person's own setting; otherwise the most any of its circles gives. Seeing the place all the time
  * through a circle needs the ok for this person; without it the person stays at „Nur bei SOS“.
  */
-export function levelFor(s: SharingState, personId: string, circleIds: string[], now: number, evenPaused = false): Level {
+export function levelFor(s: SharingState, personId: string, circleIds: string[], now: number, evenPaused = false, shared: Level | null = null): Level {
   if (s.paused && !evenPaused) return 'off'
-  const own = ownPersonLevel(s, personId, now)
-  if (own) return own
+  const base = ownPersonLevel(s, personId, now) ?? circleLevelFor(s, personId, circleIds, now)
+  // A sharing both agreed on gives at least its level (ADR 0123 §8).
+  return shared && wireOf(shared) > wireOf(base) ? shared : base
+}
+
+/** What [personId] sees through [circleIds] alone: a person's own setting may only be lower (ADR 0123 §8). */
+export function circleLevelFor(s: SharingState, personId: string, circleIds: string[], now: number): Level {
   const most = circleIds.length ? circleIds.map((c) => circleLevel(s, c, now)).reduce((a, b) => (wireOf(b) > wireOf(a) ? b : a)) : (s.default ?? 'off')
   return always(most) && !s.approved.includes(personId) ? 'when' : most
 }
 
 /**
- * Where the person and someone else stand with each other, for „Standort freigeben“ (ADR 0121 §28), as `Between` in
- * the app: [mine] what the person shows, [theirs] what the other shows back, [agreed] what both agreed on, [open]
- * while the own question has no answer yet.
+ * Where the person and someone else stand with each other, for „Standort freigeben“ (ADR 0123 §7), as `Between` in
+ * the app: [mine] what the person shows, [theirs] what the other shows back, [shared] the sharing both agreed on,
+ * [asked] an open question (by the own person if [askedByUs]).
  */
 export interface Between {
   mine: Level
   theirs: Level
-  agreed: Level | null
-  open: boolean
-  /** Something is shared all the time in either direction, agreed on or asked for: there is a sharing to show. */
+  shared: Level | null
+  asked: Level | null
+  askedByUs: boolean
+  /** A sharing holds or a question waits. */
   exists: boolean
-  /** The level both show each other all the time, the lower of the two; `null` if one of them does not. */
-  both: Level | null
-  /** The levels it still makes sense to ask for: those above what both show already. Empty: nothing more to ask. */
+  /** The levels it makes sense to ask for: not the one shared, not the one asked for. */
   askable: Level[]
-  /** The level to start the choice at: never below what the person shows already, so asking does not lower it. */
+  /** The level to start the choice at: never below what the person shows already. */
   suggested: Level | null
 }
 
-export function betweenOf(mine: Level, theirs: Level, agreed: Level | null, open: boolean): Between {
-  const both = always(mine) && always(theirs) ? (wireOf(mine) <= wireOf(theirs) ? mine : theirs) : null
-  const askable = (['area', 'exact'] as Level[]).filter((l) => wireOf(l) > wireOf(both ?? 'off'))
+export function betweenOf(mine: Level, theirs: Level, shared: Level | null, asked: Level | null = null, askedByUs = false): Between {
+  const askable = (['area', 'exact'] as Level[]).filter((l) => l !== shared && l !== asked)
   const suggested = askable.find((l) => wireOf(l) >= wireOf(mine)) ?? askable[askable.length - 1] ?? null
-  return { mine, theirs, agreed, open, exists: always(mine) || always(theirs) || agreed != null || open, both, askable, suggested }
+  return { mine, theirs, shared, asked, askedByUs, exists: shared != null || asked != null, askable, suggested }
 }
 
 /** Where the settings go: the profile space through the core. */
@@ -207,8 +210,6 @@ export class Sharing {
   constructor(
     private readonly store: SharingStore,
     private readonly local: LocalStore,
-    /** The person lowered what it shows [personId] below what both agreed on; [wire] is what it shows now, 0 for nothing. */
-    public onLowered: (personId: string, wire: number) => void = () => {},
     private readonly changed: (s: SharingState) => void = () => {},
   ) {}
 
@@ -250,28 +251,16 @@ export class Sharing {
   }
 
   /**
-   * Sets what [personId] sees, apart from its circles; `null`: follow the circles again. Lowering it below what both
-   * agreed on ends or lowers the agreement for both ([onLowered], ADR 0121 §28). [quiet]: a step of the page itself,
-   * which tells nobody; a `null` then goes back to what both agreed on, if anything.
+   * Sets what [personId] sees, apart from its circles; `null`: follow the circles again. More than the circles give
+   * goes only through „Standort freigeben“ (ADR 0123 §8); that one is not touched here.
    */
-  setPerson(personId: string, level: Level | null, quiet = false) {
-    const set = level ?? (quiet ? this.agreed(personId) : null)
+  setPerson(personId: string, level: Level | null) {
     const next = { ...this.state.persons }
-    if (set == null) delete next[personId]
-    else next[personId] = set
+    if (level == null) delete next[personId]
+    else next[personId] = level
     this.writeMap(KEYS.persons, next)
     this.set({ ...this.state, persons: next })
     this.setUntil(`p:${personId}`, 0)
-    if (quiet) return
-    this.local.set(KEPT + personId, null)
-    const agreed = this.agreed(personId)
-    if (!agreed) return
-    const shown = always(set) ? set : null
-    if (wireOf(shown ?? 'off') >= wireOf(agreed)) return
-    // The person lowers what it shows: the agreement holds at most that from now on, and the other side is told.
-    this.setAgreed(personId, shown)
-    if (shown == null) this.local.set(MUTUAL + personId, null)
-    this.onLowered(personId, shown ? wireOf(shown) : 0)
   }
 
   /** „Alles pausieren“ (ADR 0121 §29): nothing goes out and nothing new is shown; the settings stay. */
@@ -288,101 +277,35 @@ export class Sharing {
     this.set({ ...this.state, approved: next })
   }
 
-  /** What the person and [personId] agreed to show each other, as far as this browser knows it. */
-  agreed(personId: string): Level | null {
-    const l = levelOf(this.local.get(AGREED + personId))
-    return always(l) ? l : null
-  }
-
-  private setAgreed(personId: string, level: Level | null) {
-    this.local.set(AGREED + personId, level)
-  }
-
-  private before(personId: string): Level | null {
-    return levelOf(this.local.get(MUTUAL + personId)?.replace(NONE, '') || null)
-  }
-
-  private rememberBefore(personId: string) {
-    if (this.local.get(MUTUAL + personId) == null) this.local.set(MUTUAL + personId, this.state.persons[personId] ?? NONE)
+  /**
+   * Where the person and [personId] stand with each other (see [Between]): what it shows through [circleIds], its own
+   * setting or the [shared] level, what [theirs] shows back, and an open question.
+   */
+  between(personId: string, circleIds: string[], theirs: Level | null, now: number, shared: Level | null = null, asked: Level | null = null, askedByUs = false): Between {
+    return betweenOf(levelFor(this.state, personId, circleIds, now, false, shared), theirs ?? 'off', shared, asked, askedByUs)
   }
 
   /**
-   * Where the person and [personId] stand with each other (see [Between]): what it shows through [circleIds] or its
-   * own setting, what [theirs] shows back, and what this browser knows of an agreement or an open question.
+   * What this browser kept itself before the sharing moved into the core (ADR 0123 §9): per person in [ids] the
+   * agreed level and an own open question; [adopt] hands each to the core, then what was shown for it goes back to
+   * what held before, and the old keys are gone. A failure keeps them for the next start.
    */
-  between(personId: string, circleIds: string[], theirs: Level | null, now: number): Between {
-    return betweenOf(levelFor(this.state, personId, circleIds, now), theirs ?? 'off', this.agreed(personId), this.mutualOpen(personId))
-  }
-
-  /** „Standort freigeben“: the person shows [personId] its place at [level] from now on and asks for the same. */
-  askMutual(personId: string, level: Level) {
-    this.rememberBefore(personId)
-    this.local.set(OPEN + personId, '1')
-    this.approve([personId])
-    this.setPerson(personId, level, true)
-  }
-
-  /** `true` while the own question to [personId] has no answer yet. */
-  mutualOpen(personId: string): boolean {
-    return this.local.get(OPEN + personId) != null
-  }
-
-  /** [personId] answered the own question with [wire] (0 for no): after a no, back to what held before asking. */
-  mutualAnswered(personId: string, wire: number) {
-    if (!this.mutualOpen(personId)) return
-    this.local.set(OPEN + personId, null)
-    const to = levelOfWire(wire)
-    if (!always(to)) {
-      const back = this.before(personId)
-      this.local.set(MUTUAL + personId, null)
-      this.setAgreed(personId, null)
-      this.setPerson(personId, back, true)
-      return
+  async migrateMutual(ids: string[], adopt: (personId: string, level: Level | null, asked: Level | null) => Promise<boolean>) {
+    for (const id of new Set([...Object.keys(this.state.persons), ...ids])) {
+      const agreed = levelOf(this.local.get(AGREED + id))
+      const open = this.local.get(OPEN + id) != null
+      const before = this.local.get(MUTUAL + id)
+      if (!always(agreed) && !open && before == null) continue
+      const asked = open && always(this.state.persons[id]) ? this.state.persons[id] : null
+      if (always(agreed) || asked) {
+        try {
+          await adopt(id, always(agreed) ? agreed : null, asked)
+        } catch {
+          continue
+        }
+      }
+      if (before != null) this.setPerson(id, levelOf(before.replace(NONE, '') || null))
+      for (const k of [AGREED, OPEN, MUTUAL, KEPT]) this.local.set(k + id, null)
     }
-    this.setAgreed(personId, to)
-    if (wireOf(this.state.persons[personId] ?? 'off') > wireOf(to)) this.setPerson(personId, to, true)
-  }
-
-  /** The person says yes to the question of [personId], at [level]: both show each other that from now on. */
-  agreeMutual(personId: string, level: Level) {
-    this.rememberBefore(personId)
-    this.approve([personId])
-    this.setAgreed(personId, level)
-    this.setPerson(personId, level, true)
-  }
-
-  /**
-   * [personId] lowered what it shows to [wire] (0 for nothing): the person shows the same from now on. What it showed
-   * is kept for „Weiter zeigen“. `false` if there was no agreement above [wire].
-   */
-  remoteLowered(personId: string, wire: number): boolean {
-    const agreed = this.agreed(personId)
-    if (!agreed) return false
-    const to = always(levelOfWire(wire)) ? levelOfWire(wire) : null
-    if (wireOf(to ?? 'off') >= wireOf(agreed)) return false
-    const shown = this.state.persons[personId]
-    if (shown) this.local.set(KEPT + personId, shown)
-    this.setAgreed(personId, to)
-    if (to == null) {
-      const back = this.before(personId)
-      this.local.set(MUTUAL + personId, null)
-      this.setPerson(personId, back, true)
-    } else if (wireOf(this.state.persons[personId] ?? 'off') > wireOf(to)) {
-      this.setPerson(personId, to, true)
-    }
-    return true
-  }
-
-  /** What the person showed [personId] before the other side lowered, while „Weiter zeigen“ is on offer. */
-  kept(personId: string): Level | null {
-    return levelOf(this.local.get(KEPT + personId))
-  }
-
-  /** „Weiter zeigen“: the person shows [personId] again what it showed, on its own. */
-  keepShowing(personId: string) {
-    const level = this.kept(personId)
-    if (!level) return
-    this.local.set(KEPT + personId, null)
-    this.setPerson(personId, level, true)
   }
 }

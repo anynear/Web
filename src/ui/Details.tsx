@@ -35,6 +35,8 @@ import { MAX_CONTACT_NAME } from '../core/contactNames'
 import { circleSummary, originOf } from './People'
 import { StoreList } from './Files'
 import * as Icons from './icons'
+import { PersonSharings } from './Requests'
+import { canShareWith } from './Place'
 import { chatSearch, pane } from './nav'
 
 export function Details({ conv }: { conv: ConvKey }) {
@@ -310,6 +312,8 @@ function ContactDetails({ id }: { id: string }) {
         {renamable && <ActionTile icon={<Icons.Edit />} label={texts.contact.changeName} onClick={() => setAsk('name')} />}
         {p?.contact && <ActionTile icon={<Icons.Share />} label={texts.people.shareContact} onClick={() => setAsk('share')} />}
       </div>
+      {/* „Freigaben“ (ADR 0123 §7): the place and SOS with this person, each to end here. */}
+      {canShareWith(id) && <PersonSharings personId={id} />}
       {shared.length > 0 && (
         <Section title={texts.contact.inCircles}>
           {shared.map((c) => (

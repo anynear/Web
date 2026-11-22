@@ -63,7 +63,8 @@ import { Avatar } from './Avatar'
 import { Button, Confirm, CopyLink, Dialog, Qr } from './components'
 import { formatDay, formatListTime, formatSize, formatTime, formatVoiceDuration, isSameDay, splitLinks } from './format'
 import * as Icons from './icons'
-import { MutualPlaceDialog, SpotEvent, canShareWith } from './Place'
+import { SharingDialog, SpotEvent, canShareWith } from './Place'
+import { SosEventCard } from './Requests'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
 import { FileActionDialog, type FileAction, type FileItem } from './FileActions'
@@ -206,7 +207,12 @@ export function Chat({ conv }: { conv: ConvKey }) {
               return (
                 <Fragment key={m.id}>
                   {newDay && <div class="day">{formatDay(m.ts)}</div>}
-                  {m.system ? (
+                  {m.system && m.sos ? (
+                    // A step about SOS contacts (ADR 0123 §5): a card like those about places.
+                    <div id={`m-${m.id}`} class="spot-row">
+                      <SosEventCard m={m} />
+                    </div>
+                  ) : m.system ? (
                     <div class="system">{m.text}</div>
                   ) : m.deleted ? (
                     <DeletedLine m={m} highlighted={highlight === m.id} flash={flash === m.id} />
@@ -1264,7 +1270,7 @@ function Composer({
         if (e.dataTransfer?.files.length) void addFiles(e.dataTransfer.files)
       }}
     >
-      {mutualOpen.value && mutualWith && <MutualPlaceDialog personId={mutualWith} onClose={() => (mutualOpen.value = false)} />}
+      {mutualOpen.value && mutualWith && <SharingDialog personId={mutualWith} onClose={() => (mutualOpen.value = false)} />}
       {passedOn.value && <PassedOnLabel />}
       {reply && <ReplyBar m={reply} onCancel={onCancelReply} />}
       {(drafts.value.length > 0 || preparing.value > 0 || problem.value) && (
@@ -1306,7 +1312,7 @@ function Composer({
         <button type="button" class="icon-btn attach-btn" aria-label={texts.compose.attach} title={texts.compose.attach} onClick={() => picker.current?.click()}>
           <Icons.Paperclip />
         </button>
-        {/* „Standort freigeben“ in a chat with one person (ADR 0121 §28); the app has it in the „+“. */}
+        {/* „Standort freigeben“ in a chat with one person (ADR 0123 §2); the app has it in the „+“. */}
         {mutualWith && (
           <button type="button" class="icon-btn attach-btn" aria-label={texts.place.mutualStart} title={texts.place.mutualStart} onClick={() => (mutualOpen.value = true)}>
             <Icons.Map />

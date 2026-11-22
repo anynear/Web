@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY, KEYS, Sharing, betweenOf, decodeSetting, encodeSetting, levelFor, takeSettings, type LocalStore } from '../src/core/sharing'
+import { EMPTY, KEYS, Sharing, betweenOf, circleLevelFor, decodeSetting, encodeSetting, levelFor, takeSettings, type LocalStore } from '../src/core/sharing'
 import { de } from '../src/i18n/de'
 import { en } from '../src/i18n/en'
 
@@ -10,10 +10,9 @@ function memory(): LocalStore & { map: Map<string, string> } {
 
 function setup() {
   const written = new Map<string, string>()
-  const lowered: [string, number][] = []
   const local = memory()
-  const s = new Sharing({ write: (n, v) => written.set(n, v) }, local, (p, w) => lowered.push([p, w]))
-  return { s, written, lowered, local }
+  const s = new Sharing({ write: (n, v) => written.set(n, v) }, local)
+  return { s, written, local }
 }
 
 describe('Wer sieht mich (ADR 0121 §27)', () => {
@@ -69,93 +68,59 @@ describe('Wer sieht mich (ADR 0121 §27)', () => {
   })
 })
 
-describe('Standort gegenseitig teilen (ADR 0121 §28)', () => {
-  it('wer fragt, zeigt zuerst; nach einem Nein gilt wieder, was vorher galt', () => {
+describe('Standort freigeben (ADR 0123)', () => {
+  it('eine Freigabe gibt mindestens ihre Stufe und lässt beim Beenden nichts zurück', () => {
     const { s } = setup()
-    s.setPerson('p1', 'when')
-    s.askMutual('p1', 'exact')
-    expect(s.state.persons.p1).toBe('exact')
-    expect(s.mutualOpen('p1')).toBe(true)
-    s.mutualAnswered('p1', 0)
-    expect(s.state.persons.p1).toBe('when')
-    expect(s.agreed('p1')).toBeNull()
+    s.setDefault('when')
+    expect(levelFor(s.state, 'anna', [], 0)).toBe('when')
+    expect(levelFor(s.state, 'anna', [], 0, false, 'exact')).toBe('exact')
+    // Ended: the core gives no level any more, and nothing is left to put back.
+    expect(levelFor(s.state, 'anna', [], 0, false, null)).toBe('when')
+    s.setPaused(true)
+    expect(levelFor(s.state, 'anna', [], 0, false, 'exact')).toBe('off')
   })
 
-  it('nach dem Entziehen ohne Freigabe vorher fällt sie auf nichts', () => {
+  it('eine eigene Einstellung für eine Person kann nur weniger zeigen als die Kreise', () => {
     const { s } = setup()
-    s.askMutual('p1', 'area')
-    s.mutualAnswered('p1', 0)
-    expect(s.state.persons.p1).toBeUndefined()
+    s.setCircle('familie', 'exact', ['anna'])
+    expect(circleLevelFor(s.state, 'anna', ['familie'], 0)).toBe('exact')
+    s.setPerson('anna', 'when')
+    expect(levelFor(s.state, 'anna', ['familie'], 0)).toBe('when')
   })
 
-  it('ein Ja zu weniger senkt auch die eigene Freigabe', () => {
-    const { s } = setup()
-    s.askMutual('p1', 'exact')
-    s.mutualAnswered('p1', 2)
-    expect(s.agreed('p1')).toBe('area')
-    expect(s.state.persons.p1).toBe('area')
-  })
-
-  it('wer unter das Vereinbarte senkt, sagt es der anderen Seite', () => {
-    const { s, lowered } = setup()
-    s.agreeMutual('p1', 'exact')
-    s.setPerson('p1', 'exact')
-    expect(lowered).toEqual([])
-    s.setPerson('p1', 'area')
-    expect(lowered).toEqual([['p1', 2]])
-    expect(s.agreed('p1')).toBe('area')
-    s.setPerson('p1', 'off')
-    expect(lowered).toEqual([
-      ['p1', 2],
-      ['p1', 0],
-    ])
-    expect(s.agreed('p1')).toBeNull()
-  })
-
-  it('die andere Seite senkt: die eigene folgt, „Weiter zeigen“ holt sie zurück', () => {
-    const { s, lowered } = setup()
-    s.setPerson('p1', 'when')
-    s.agreeMutual('p1', 'exact')
-    expect(s.remoteLowered('p1', 2)).toBe(true)
-    expect(s.state.persons.p1).toBe('area')
-    expect(s.kept('p1')).toBe('exact')
-    s.keepShowing('p1')
-    expect(s.state.persons.p1).toBe('exact')
-    expect(s.kept('p1')).toBeNull()
-    // Entzogen: back to before the request, and nothing is sent for it.
-    expect(s.remoteLowered('p1', 0)).toBe(true)
-    expect(s.state.persons.p1).toBe('when')
-    expect(lowered).toEqual([])
-    // Without an agreement nothing changes.
-    expect(s.remoteLowered('p2', 0)).toBe(false)
-  })
-
-  // The reported bug: both share precisely already, set up outside „Standort freigeben“; a second tap shows that.
-  it('„Standort freigeben“ erkennt eine bestehende Freigabe und fragt nicht neu', () => {
-    const { s } = setup()
+  it('was der Browser selbst behielt, geht einmal in den Kern', async () => {
+    const { s, local } = setup()
+    local.set('location.mutual.agreed.anna', 'exact')
+    local.set('location.mutual.before.anna', 'when')
+    local.set('location.mutual.open.tom', '1')
+    local.set('location.mutual.before.tom', '-')
     s.setPerson('anna', 'exact')
-    const b = s.between('anna', [], 'exact', 0)
-    expect(b.exists).toBe(true)
-    expect(b.both).toBe('exact')
-    expect(b.askable).toEqual([])
-    expect(b.suggested).toBeNull()
+    s.setPerson('tom', 'area')
+    const adopted: [string, string | null, string | null][] = []
+    await s.migrateMutual(['anna', 'tom', 'ben'], async (id, level, asked) => {
+      adopted.push([id, level, asked])
+      return true
+    })
+    expect(adopted).toEqual([
+      ['anna', 'exact', null],
+      ['tom', null, 'area'],
+    ])
+    expect(s.state.persons.anna).toBe('when')
+    expect(s.state.persons.tom).toBeUndefined()
+    await s.migrateMutual(['anna', 'tom'], async () => true)
+    expect(adopted.length).toBe(2)
   })
 
-  it('auch eine Freigabe über den Kreis zählt; gefragt wird nur nach mehr', () => {
-    const b = betweenOf('exact', 'area', null, false)
-    expect(b.both).toBe('area')
-    expect(b.askable).toEqual(['exact'])
-    expect(b.suggested).toBe('exact')
-  })
-
-  it('offene Anfrage und Absprache werden gezeigt, ohne Freigabe ist es eine neue Frage', () => {
+  // The reported bug (21.11.2026): a sharing that holds is shown, and only another level is offered.
+  it('„Standort freigeben“ erkennt eine bestehende Freigabe und bietet nur eine andere Stufe an', () => {
     const { s } = setup()
-    s.askMutual('tom', 'exact')
-    const tom = s.between('tom', [], null, 0)
-    expect(tom.open && tom.exists).toBe(true)
-    expect(tom.suggested).toBe('exact')
-    s.agreeMutual('ben', 'area')
-    expect(s.between('ben', [], null, 0).agreed).toBe('area')
+    const b = s.between('anna', [], 'exact', 0, 'exact')
+    expect(b.exists).toBe(true)
+    expect(b.shared).toBe('exact')
+    expect(b.askable).toEqual(['area'])
+    const tom = betweenOf('off', 'off', null, 'exact', true)
+    expect(tom.exists).toBe(true)
+    expect(tom.askable).toEqual(['area'])
     const eva = s.between('eva', [], null, 0)
     expect(eva.exists).toBe(false)
     expect(eva.askable).toEqual(['area', 'exact'])

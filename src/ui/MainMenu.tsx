@@ -42,6 +42,18 @@ function contextActions(): MenuAction[] {
         { label: texts.alerts.createChannel, icon: <Icons.Plus size={20} />, action: () => (dialog.value = 'createChannel') },
         { label: texts.alerts.joinChannel, icon: <Icons.Link size={20} />, action: () => (dialog.value = 'joinChannel') },
       ]
+    case 'messages':
+      // Everything open in one list (ADR 0123 §6), also when nothing waits.
+      return [
+        {
+          label: texts.people.requestsPage,
+          icon: <Icons.Person size={20} />,
+          action: () => {
+            openSettings(null)
+            pane.value = 'requests'
+          },
+        },
+      ]
     case 'circles':
       // Invitations mostly arrive as a link that opens anynear by itself (ADR 0101).
       return [

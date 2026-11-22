@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Msg } from '../src/core/messages'
-import { SPOT, answerTo, answersQuestion, mutualAnswered, newestShared, spotLine } from '../src/core/spots'
-import { currentAsk } from '../src/core/sos'
+import { SPOT, answerTo, answersQuestion, newestShare, spotLine } from '../src/core/spots'
+import { SOS_CARD, sosCards, sosHelpers, takeHelpers } from '../src/core/sos'
 import { urgent } from '../src/core/lifesigns'
 import { texts } from '../src/i18n'
 import { de } from '../src/i18n/de'
@@ -35,28 +35,42 @@ describe('Karten im Chat (ADR 0121 §26)', () => {
     expect(answerTo(ask, [ask, own, answer])?.id).toBe('c')
   })
 
-  it('unterscheidet Antwort und späteres Senken', () => {
+  it('unterscheidet Antwort und späteres Senken älterer Apps; nur die neueste Frage hat Knöpfe', () => {
     const question = msg('q', 1, true, SPOT.SHARE, { level: 3 })
     const yes = msg('y', 2, false, SPOT.SHARED, { level: 3 })
     const lowered = msg('l', 3, false, SPOT.SHARED, { level: 2 })
-    const all = [question, yes, lowered]
-    expect(mutualAnswered(question, all)).toBe(true)
+    const ended = msg('e', 4, false, SPOT.ENDED)
+    const again = msg('a', 5, true, SPOT.SHARE, { level: 2 })
+    const all = [question, yes, lowered, ended, again]
     expect(answersQuestion(yes, all)).toBe(true)
     expect(answersQuestion(lowered, all)).toBe(false)
-    expect(newestShared(yes, all)).toBe(false)
-    expect(newestShared(lowered, all)).toBe(true)
+    expect(newestShare(question, all)).toBe(false)
+    expect(newestShare(again, all)).toBe(true)
+    expect(spotLine(SPOT.ENDED, undefined, false)).toBe(texts.place.sharingEndedNotice)
+    expect(spotLine(SPOT.WITHDRAWN, undefined, false)).toBe(texts.place.sharingWithdrawnNotice)
   })
 })
 
 describe('SOS-Kontakte (ADR 0121 §25)', () => {
-  it('zeigt die älteste Anfrage, die nicht auf später gelegt ist', () => {
-    const asks = [
-      { person: 'a', at: 1, circleId: null },
-      { person: 'b', at: 2, circleId: 'c' },
-    ]
-    expect(currentAsk(asks, [])?.person).toBe('a')
-    expect(currentAsk(asks, ['a'])?.person).toBe('b')
-    expect(currentAsk(asks, ['a', 'b'])).toBeNull()
+  it('liest die Auswahl der SOS-Kontakte so, wie die App sie schreibt', () => {
+    takeHelpers('1c:familie,p:anna,x:ben')
+    expect(sosHelpers.value).toEqual({ circles: ['familie'], persons: ['anna'], except: ['ben'] })
+    takeHelpers('0')
+    expect(sosHelpers.value).toEqual({ circles: [], persons: [], except: [] })
+  })
+
+  it('jeder Schritt wird eine Karte im Chat (ADR 0123 §5)', () => {
+    expect(sosCards(false, true, false, false, undefined, undefined, false)).toEqual([SOS_CARD.ASKED_US])
+    expect(sosCards(true, false, false, true, undefined, undefined, false)).toEqual([SOS_CARD.WE_YES])
+    expect(sosCards(true, false, false, false, undefined, undefined, false)).toEqual([SOS_CARD.WE_NO])
+    expect(sosCards(false, false, true, false, undefined, undefined, false)).toEqual([SOS_CARD.OVER_FOR_US])
+    expect(sosCards(false, false, false, false, 1, 2, false)).toEqual([SOS_CARD.THEY_YES])
+    expect(sosCards(false, false, false, false, 2, undefined, false)).toEqual([SOS_CARD.OVER_FOR_THEM])
+    expect(sosCards(false, false, false, false, 1, 1, false)).toEqual([])
+    expect(de.sos.card(SOS_CARD.THEY_YES, 'Anna')).toBe('Anna ist jetzt dein SOS-Kontakt')
+    expect(en.sos.card(SOS_CARD.WE_YES, 'Anna')).toBe("You're now Anna's SOS contact")
+    expect(de.place.sharingAccept).toBe('Annehmen')
+    expect(en.people.requestsPage).toBe('Requests')
   })
 
   it('ein ausgebliebenes Lebenszeichen drängt nur bei Zusage und „Laut“', () => {
