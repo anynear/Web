@@ -342,9 +342,17 @@ export const DELETE_FOR_ALL_MS = 48 * 60 * 60 * 1000
 /** This long the browser remembers a deletion whose message is not there yet. */
 export const PENDING_DELETE_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * The app put this into the chat as a card (system card): a line about the circle, a step about SOS contacts, a place
+ * or sharing it, an introduced contact. Nobody can delete it, here or for everyone.
+ */
+export function isSystemCard(m: Msg): boolean {
+  return !!m.system || !!m.spot || !!m.intro
+}
+
 /** Whether „Für alle löschen“ is offered: own, sent message, at most 48 hours old. */
 export function canDeleteForAll(m: Msg, now: number): boolean {
-  return m.outgoing && !!m.mid && !m.system && !m.deleted && m.status !== 'failed' && m.status !== 'sending' && now - m.ts <= DELETE_FOR_ALL_MS
+  return m.outgoing && !!m.mid && !isSystemCard(m) && !m.deleted && m.status !== 'failed' && m.status !== 'sending' && now - m.ts <= DELETE_FOR_ALL_MS
 }
 
 /** The deleted message: text, attachments, reactions and preview gone; sender, time and ID stay. */
@@ -372,7 +380,8 @@ export function pendingDelete(conv: ConvKey, tag: string, mid: string, now: numb
  * known (own message from the history without device), the message ID (8 random bytes) is enough.
  */
 export function hits(m: Msg, conv: ConvKey, tag: string, mid: string, tagOf: (m: Msg) => string | null): boolean {
-  if (m.system || m.conv !== conv || m.mid !== mid) return false
+  // A system card stays, also if an older app deletes it for everyone.
+  if (isSystemCard(m) || m.conv !== conv || m.mid !== mid) return false
   const t = tagOf(m)
   return t === null || t === tag
 }

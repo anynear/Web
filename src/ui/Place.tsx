@@ -29,6 +29,8 @@ import { parseKey } from '../core/messages'
 import { Avatar } from './Avatar'
 import { Button, Dialog, Row, Section } from './components'
 import { formatTime } from './format'
+import type { ComponentChildren } from 'preact'
+import { GoodTick, SystemCard } from './SystemCard'
 import * as Icons from './icons'
 import { pane } from './nav'
 
@@ -404,23 +406,19 @@ export function SharingDialog({ personId, onClose }: { personId: string; onClose
  * A message about a place as a card in the middle, the same for sender and reader; it names who it is from. The
  * browser shows no map: a place opens on OpenStreetMap over the button, as before.
  */
-export function SpotEvent({ m }: { m: Msg }) {
+export function SpotEvent({ m, meta }: { m: Msg; meta?: ComponentChildren }) {
   const s = m.spot!
   const t = texts.place
   const who = personName(m.fromPerson, m.fromName)
   const all = messages.value
-  if (s.kind >= SPOT.SHARE && s.kind <= SPOT.WITHDRAWN) return <MutualCard m={m} who={who} all={all} />
+  if (s.kind >= SPOT.SHARE && s.kind <= SPOT.WITHDRAWN) return <MutualCard m={m} who={who} all={all} meta={meta} />
   if (s.kind === SPOT.ALL) {
     const over = !!s.until && s.until <= Date.now()
     return (
-      <div class="spot-card">
-        <div class="spot-title">
-          <Icons.Map size={20} />
-          <strong>{over ? t.shareAllOver : s.until ? t.shareAllUntil(formatTime(s.until)) : t.shareAll}</strong>
-        </div>
+      <SystemCard icon={<Icons.Circle size={20} />} title={over ? t.shareAllOver : s.until ? t.shareAllUntil(formatTime(s.until)) : t.shareAll} meta={meta}>
         <span class="muted small">{m.outgoing ? t.spotByOwn : t.spotBy(who)}</span>
         {!over && !m.outgoing && <span class="muted small">{t.shareAllHint}</span>}
-      </div>
+      </SystemCard>
     )
   }
   const arrived = s.kind === SPOT.ARRIVED
@@ -445,11 +443,7 @@ export function SpotEvent({ m }: { m: Msg }) {
   const answer = ask ? answerTo(m, all) : undefined
   const direct = parseKey(m.conv).kind === 'direct'
   return (
-    <div class={`spot-card ${arrived ? 'arrived' : ''}`}>
-      <div class="spot-title">
-        {arrived ? <span class="spot-tick" aria-hidden="true">✓</span> : <Icons.Map size={20} />}
-        <strong>{title}</strong>
-      </div>
+    <SystemCard icon={arrived ? <GoodTick /> : <Icons.Map size={20} />} title={title} good={arrived} meta={meta}>
       {s.kind === SPOT.MEET && <span class="muted small">{m.outgoing ? t.spotByOwn : t.spotBy(who)}</span>}
       {arrived && s.label && <span>{s.label}</span>}
       {place && (
@@ -475,12 +469,12 @@ export function SpotEvent({ m }: { m: Msg }) {
             {!m.outgoing && <span class="muted small">{t.spotAnswerHint}</span>}
           </>
         ))}
-    </div>
+    </SystemCard>
   )
 }
 
 /** The question to see each other and its answer as cards (ADR 0121 §28). */
-function MutualCard({ m, who, all }: { m: Msg; who: string; all: Msg[] }) {
+function MutualCard({ m, who, all, meta }: { m: Msg; who: string; all: Msg[]; meta?: ComponentChildren }) {
   const t = texts.place
   const s = m.spot!
   const { kind: convKind, id } = parseKey(m.conv)
@@ -508,11 +502,7 @@ function MutualCard({ m, who, all }: { m: Msg; who: string; all: Msg[] }) {
     v.askedByUs === m.outgoing &&
     wireOf(v.asked) === s.level
   return (
-    <div class={`spot-card ${good ? 'arrived' : ''}`}>
-      <div class="spot-title">
-        {good ? <span class="spot-tick" aria-hidden="true">✓</span> : s.kind === SPOT.SHARE ? <Icons.Map size={20} /> : <Icons.Close size={20} />}
-        <strong>{title}</strong>
-      </div>
+    <SystemCard icon={good ? <GoodTick /> : s.kind === SPOT.SHARE ? <Icons.Map size={20} /> : <Icons.Close size={20} />} title={title} good={good} meta={meta}>
       {open &&
         (m.outgoing ? (
           <>
@@ -529,7 +519,7 @@ function MutualCard({ m, who, all }: { m: Msg; who: string; all: Msg[] }) {
             <SharingAnswerButtons personId={id} />
           </>
         ))}
-    </div>
+    </SystemCard>
   )
 }
 

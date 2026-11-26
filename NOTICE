@@ -1,7 +1,7 @@
 anynear Web
 Copyright 2026 Kevin Schu
 
-Licensed under GPL-3.0-or-later; a commercial license is available (COMMERCIAL.md).
+Licensed under GPL-3.0-or-later; a commercial license is available (COMMERCIAL.md), not for the Meshtastic layer.
 
 Contains the ANMP core (GPL-3.0-or-later) and libraries under MIT and Apache licenses,
 see package.json. The typeface Inter is licensed under the SIL Open Font License (public/fonts/OFL.txt).

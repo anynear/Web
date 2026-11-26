@@ -1,7 +1,7 @@
 // A conversation: messages with day headings, states (ADR 0003, 0019), reactions (ADR 0018), attachments
 // (ADR 0011) and the search in the chat as in the app (ChatSearch.kt).
 import { useComputed, useSignal } from '@preact/signals'
-import { Fragment } from 'preact'
+import { Fragment, type ComponentChildren } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { texts } from '../i18n'
 import { LIMITS, mimeOf, prepareFile, type Prepared } from '../core/media'
@@ -65,6 +65,7 @@ import { formatDay, formatListTime, formatSize, formatTime, formatVoiceDuration,
 import * as Icons from './icons'
 import { SharingDialog, SpotEvent, canShareWith } from './Place'
 import { SosEventCard } from './Requests'
+import { SystemCard } from './SystemCard'
 import { openViewer, type ViewerItem } from './Viewer'
 import { AboLimitHint } from './AboLimitHint'
 import { FileActionDialog, type FileAction, type FileItem } from './FileActions'
@@ -207,20 +208,22 @@ export function Chat({ conv }: { conv: ConvKey }) {
               return (
                 <Fragment key={m.id}>
                   {newDay && <div class="day">{formatDay(m.ts)}</div>}
-                  {m.system && m.sos ? (
-                    // A step about SOS contacts (ADR 0123 §5): a card like those about places.
-                    <div id={`m-${m.id}`} class="spot-row">
-                      <SosEventCard m={m} />
+                  {m.system || ((m.spot || m.intro) && !m.deleted) ? (
+                    // What the app itself puts into the chat is a system card in the middle, the same for everyone,
+                    // without menu, reactions or deleting (ADR 0121 §26, 0123 §5, 0116).
+                    <div id={`m-${m.id}`} class={`spot-row ${highlight === m.id ? 'highlight' : ''}`}>
+                      {m.system && m.sos ? (
+                        <SosEventCard m={m} meta={<CardMeta m={m} inCircle={kind === 'circle'} />} />
+                      ) : m.system ? (
+                        <SystemCard icon={<Icons.Circle size={20} />} title={m.text} meta={<CardMeta m={m} inCircle={kind === 'circle'} />} />
+                      ) : m.spot ? (
+                        <SpotEvent m={m} meta={<CardMeta m={m} inCircle={kind === 'circle'} />} />
+                      ) : (
+                        <IntroCardView m={m} intro={m.intro!} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} meta={<CardMeta m={m} inCircle={kind === 'circle'} />} />
+                      )}
                     </div>
-                  ) : m.system ? (
-                    <div class="system">{m.text}</div>
                   ) : m.deleted ? (
                     <DeletedLine m={m} highlighted={highlight === m.id} flash={flash === m.id} />
-                  ) : m.spot ? (
-                    // What the app sends for the person is a card in the middle, not a bubble (ADR 0121 §26).
-                    <div id={`m-${m.id}`} class={`spot-row ${highlight === m.id ? 'highlight' : ''}`}>
-                      <SpotEvent m={m} />
-                    </div>
                   ) : (
                     <Bubble m={m} inCircle={kind === 'circle'} showName={kind === 'circle' && !m.outgoing && !sameAuthor} highlighted={highlight === m.id}
                       flash={flash === m.id}
@@ -230,7 +233,11 @@ export function Chat({ conv }: { conv: ConvKey }) {
                       onQuote={() => showOriginal(m)}
                     />
                   )}
-                  {replySoon && <div class="system">{texts.support.replySoon}</div>}
+                  {replySoon && (
+                    <div class="spot-row">
+                      <SystemCard icon={<Icons.Help size={20} />} title={texts.support.replySoon} />
+                    </div>
+                  )}
                 </Fragment>
               )
             })}
@@ -426,11 +433,9 @@ function Bubble({
   }, [fileNotice])
   const reactions = reactionSummary(m)
   const invites = m.text ? findInviteLinks(m.text) : []
-  // With an introduction (ADR 0116) the card says it all; the text is only the stand-in for older apps.
-  const text = m.intro || m.spot ? '' : invites.length ? withoutInviteLinks(m.text, invites) : m.text
-  // Its picture goes along as a photo (ADR 0116 §2); the card shows it small as the profile picture instead.
-  const introPhoto = m.intro ? m.attachments.find((a) => a.type === 'jpg') : undefined
-  const attachments = introPhoto ? m.attachments.filter((a) => a !== introPhoto) : m.attachments
+  // Places and introduced contacts never get here: they are system cards.
+  const text = invites.length ? withoutInviteLinks(m.text, invites) : m.text
+  const attachments = m.attachments
   const link = shownLink(m)
   // One does not react to own messages (as in the app); every message can be deleted.
   const canReact = !!m.mid && !m.outgoing
@@ -485,7 +490,6 @@ function Bubble({
           </div>
         )}
         {link && <LinkPreviewCard m={m} link={link} />}
-        {m.intro && <IntroCardView m={m} intro={m.intro} photo={introPhoto} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />}
         {invites.map((l) => (
           <InviteCard key={l.start} link={l} sender={personName(m.fromPerson, m.fromName)} own={m.outgoing} />
         ))}
@@ -808,6 +812,17 @@ function StatusLine({ m, inCircle }: { m: Msg; inCircle: boolean }) {
     case 'readSome':
       return <span class="status">✓✓ {texts.chat.readBy(s.n, s.total)}</span>
   }
+}
+
+/** Time and, for an own system card, its state (without „Erneut senden“: the card is sent again from where it came). */
+function CardMeta({ m, inCircle }: { m: Msg; inCircle: boolean }) {
+  const failed = m.outgoing && shownStatus(m, inCircle).kind === 'failed'
+  return (
+    <>
+      <span>{formatTime(m.ts)}</span>
+      {m.outgoing && (failed ? <span class="status failed">{texts.chat.failed}</span> : <StatusLine m={m} inCircle={inCircle} />)}
+    </>
+  )
 }
 
 function attachmentLabel(a: Att): string {
@@ -1400,56 +1415,27 @@ function Composer({
   )
 }
 
-// --- Introduced contact as a card (like IntroCardBox of the app, ADR 0116) -----------------------------------------
+// --- Introduced contact as a system card (like IntroCard of the app, ADR 0116) -----------------------------------
 
-/** Picture of the introduced person, small and round as a profile picture; a person icon while missing. */
-function IntroPicture({ m, photo }: { m: Msg; photo?: Att }) {
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    let live = true
-    setUrl(null)
-    if (photo) attachmentUrl(m, photo, mimeOf(photo.type, photo.name)).then((u) => live && setUrl(u), () => {})
-    return () => {
-      live = false
-    }
-  }, [photo?.id])
-  return url ? (
-    <img class="invite-icon intro-photo" src={url} width={40} height={40} alt="" />
-  ) : (
-    <span class="invite-icon">
-      <Icons.Person size={22} />
-    </span>
-  )
-}
-
-function IntroCardView({ m, intro, photo, sender, own }: { m: Msg; intro: IntroCard; photo?: Att; sender: string; own: boolean }) {
+function IntroCardView({ intro, sender, own, meta }: { m: Msg; intro: IntroCard; sender: string; own: boolean; meta?: ComponentChildren }) {
   const [asking, setAsking] = useState(false)
   const [note, setNote] = useState('')
   const state = introState(intro, own, people.value.get(intro.person)?.contact === true, sentRequests.value.some((r) => r.person === intro.person), Date.now())
   const t = texts.people
   const status = introStatus(state)
   const action = state === 'open' ? t.introAdd : undefined
-  const body = (
-    <>
-      <span class="invite-top">
-        <IntroPicture m={m} photo={photo} />
-        <span class="invite-texts">
-          <span class="invite-sentence">{own ? t.introCardOwn(intro.name) : t.introCardIncoming(sender, intro.name)}</span>
-          {(note || status) && <span class="invite-status">{note || status}</span>}
-        </span>
-      </span>
-      {action && <span class="invite-action">{action}</span>}
-    </>
-  )
   return (
     <>
-      {action ? (
-        <button type="button" class="invite-card" onClick={() => setAsking(true)}>
-          {body}
-        </button>
-      ) : (
-        <div class="invite-card">{body}</div>
-      )}
+      <SystemCard icon={<Icons.Person size={20} />} title={own ? t.introCardOwn(intro.name) : t.introCardIncoming(sender, intro.name)} meta={meta}>
+        {(note || status) && <span class="muted small">{note || status}</span>}
+        {action && (
+          <div class="spot-actions">
+            <Button kind="secondary" onClick={() => setAsking(true)}>
+              {action}
+            </Button>
+          </div>
+        )}
+      </SystemCard>
       {asking && (
         <Confirm
           title={t.introConfirmTitle(intro.name)}

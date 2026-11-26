@@ -272,7 +272,6 @@ button { font: inherit; color: inherit; }
 
 .messages { flex: 1; overflow-y: auto; padding: 16px clamp(12px, 5vw, 64px) 24px; display: flex; flex-direction: column; gap: 2px; }
 .day { align-self: center; margin: 14px 0 8px; padding: 3px 12px; border-radius: 999px; background: var(--orange-hell); font-size: 0.82rem; font-weight: 500; color: var(--orange-text); }
-.system { align-self: center; margin: 6px 0; font-size: 0.88rem; color: var(--muted); text-align: center; max-width: 80%; }
 .update-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: center; padding: 8px 16px; background: var(--orange-hell); color: var(--orange-text); font-size: 0.9rem; }
 .hint { align-self: center; padding: 8px 14px; border-radius: 10px; background: var(--orange-hell); color: var(--orange-text); font-size: 0.9rem; margin-bottom: 8px; }
 .empty-chat { align-self: center; margin: auto; color: var(--muted); }
@@ -725,7 +724,6 @@ button.invite-card:hover { border-color: var(--signalorange); }
 button.invite-card:focus-visible { outline: 3px solid var(--bernstein); outline-offset: 2px; }
 .invite-top { display: flex; align-items: center; gap: 12px; }
 .invite-icon { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--orange-hell); color: var(--nachtblau); }
-.intro-photo { object-fit: cover; padding: 0; }
 .invite-icon.broken { background: var(--active); color: var(--muted); }
 .invite-texts { display: grid; gap: 2px; min-width: 0; }
 .invite-sentence { font-size: 1rem; overflow-wrap: anywhere; }
@@ -862,7 +860,7 @@ tbody tr:last-child .abo-col.selected { box-shadow: inset 2px -2px 0 var(--signa
 .login-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .login-choice { min-height: 56px; font-size: 1.4rem; font-weight: 600; }
 
-/* Cards for places in the chat (ADR 0121 §26): in the middle, the same for sender and reader. */
+/* System cards in the chat (SystemCard.tsx): in the middle, the same for sender and reader, for every kind. */
 .spot-row { align-self: center; width: min(360px, 92%); margin: 10px 0; }
 .spot-row.highlight .spot-card { outline: 2px solid var(--signalorange); }
 .spot-card {
@@ -880,3 +878,4 @@ tbody tr:last-child .abo-col.selected { box-shadow: inset 2px -2px 0 var(--signa
   color: var(--muted); font-size: 0.85rem;
 }
 .spot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.spot-meta { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; font-size: 0.75rem; color: var(--muted); }
