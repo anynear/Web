@@ -10,6 +10,7 @@ import {
   canDeleteForAll,
   chatMatches,
   expiredPending,
+  isSystemCard,
   pendingDelete,
   shownLink,
   summarize,
@@ -126,5 +127,20 @@ describe('Vorschau für Links', () => {
   it('anynear-Einladungen behalten ihre eigene Karte', () => {
     const invite = { url: 'https://anynear.app/k#abc', title: 'Kreis' }
     expect(shownLink(msg({ text: invite.url, link: invite }))).toBeNull()
+  })
+})
+
+describe('Systemkarten', () => {
+  const own = { outgoing: true, status: 'sent' as const, ts: NOW - 1000 }
+  it('lassen sich nicht für alle löschen', () => {
+    expect(canDeleteForAll(msg({ ...own, spot: { kind: 1, latitude: 50, longitude: 8 } } as Partial<Msg>), NOW)).toBe(false)
+    expect(canDeleteForAll(msg({ ...own, intro: { id: 'I', person: 'Q', name: 'B', byPerson: 'P', until: NOW + 1, card: '' } } as Partial<Msg>), NOW)).toBe(false)
+    expect(canDeleteForAll(msg(own), NOW)).toBe(true)
+  })
+  it('bleiben, auch wenn eine ältere App sie für alle löscht', () => {
+    const card = msg({ spot: { kind: 3, latitude: 50, longitude: 8 } } as Partial<Msg>)
+    expect(applyDelete([card], 'c:k', 'T-DEV', 'M1', tagOf)).toBeNull()
+    expect(isSystemCard(card)).toBe(true)
+    expect(isSystemCard(msg())).toBe(false)
   })
 })

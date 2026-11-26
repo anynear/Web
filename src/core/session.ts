@@ -62,6 +62,7 @@ import {
   expiredPending,
   fromB64u,
   listedConversations,
+  isSystemCard,
   markDeleted,
   newMid,
   ownHistoryOf,
@@ -1086,7 +1087,7 @@ export async function react(m: Msg, emoji: string) {
 
 /** Delete an own message for everyone (ADR 0068); `false` if it did not go out. */
 export async function deleteForEveryone(m: Msg): Promise<boolean> {
-  if (!core || !m.mid || !m.outgoing || m.deleted) return false
+  if (!core || !m.mid || !m.outgoing || m.deleted || isSystemCard(m)) return false
   const author = m.fromDevice ?? me.value?.deviceId
   if (!author) return false
   const { kind, id } = parseKey(m.conv)
@@ -1104,6 +1105,8 @@ export async function deleteForEveryone(m: Msg): Promise<boolean> {
 /** Delete a message only in this browser, without a line; for the others it stays. */
 export async function deleteForMe(m: Msg) {
   const current = messages.value.find((x) => x.id === m.id) ?? m
+  // System cards stay: they record what happened in the chat.
+  if (isSystemCard(current)) return
   // An own message that is still waiting does not go out any more (ADR 0090).
   if (m.outgoing && m.mid) await core?.cancelSend(m.mid)
   messages.value = messages.value.filter((x) => x.id !== m.id)

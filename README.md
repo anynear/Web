@@ -133,7 +133,8 @@ Changes to `main` are made only by pull request with green CI; nobody pushes to 
 
 ## License
 
-GPL-3.0-or-later (`LICENSE`, `NOTICE`); a commercial license is available (`COMMERCIAL.md`). Names and logos are
+GPL-3.0-or-later (`LICENSE`, `NOTICE`); a commercial license is available (`COMMERCIAL.md`), except for the
+Meshtastic® layer, which stays GPL-only. Names and logos are
 excluded (`TRADEMARKS.md`).
 
 For official warnings, the web app determines the district from the approximate location in the browser, using a table

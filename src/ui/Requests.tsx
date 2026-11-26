@@ -24,6 +24,8 @@ import { SOS_CARD, answerSos, askAsSos, endSos, setSosHelpers, sosAgreed, sosAsk
 import type { Level } from '../core/sharing'
 import { Avatar } from './Avatar'
 import { Button, Row, Section } from './components'
+import type { ComponentChildren } from 'preact'
+import { GoodTick, SystemCard } from './SystemCard'
 import * as Icons from './icons'
 import { pane } from './nav'
 import { SharingAnswerButtons, SharingDialog, SharingState, betweenWith } from './Place'
@@ -269,18 +271,14 @@ export function SosHelpersSection() {
 }
 
 /** A step about SOS contacts with the person of the chat (ADR 0123 §5); the newest open question has its buttons. */
-export function SosEventCard({ m }: { m: Msg }) {
+export function SosEventCard({ m, meta }: { m: Msg; meta?: ComponentChildren }) {
   const t = texts.place
   const { id } = parseKey(m.conv)
   const good = m.sos === SOS_CARD.THEY_YES || m.sos === SOS_CARD.WE_YES
   const newest = !messages.value.some((x) => x.conv === m.conv && x.sos === SOS_CARD.ASKED_US && x.ts > m.ts)
   const open = m.sos === SOS_CARD.ASKED_US && newest && sosAsks.value.some((a) => a.person === id)
   return (
-    <div class={`spot-card ${good ? 'arrived' : ''}`}>
-      <div class="spot-title">
-        {good ? <span class="spot-tick" aria-hidden="true">✓</span> : <Icons.Person size={20} />}
-        <strong>{m.text}</strong>
-      </div>
+    <SystemCard icon={good ? <GoodTick /> : <Icons.Person size={20} />} title={m.text} good={good} meta={meta}>
       {open && (
         <div class="spot-actions">
           <Button kind="secondary" onClick={() => void answerSos(id, true)}>
@@ -291,6 +289,6 @@ export function SosEventCard({ m }: { m: Msg }) {
           </Button>
         </div>
       )}
-    </div>
+    </SystemCard>
   )
 }
